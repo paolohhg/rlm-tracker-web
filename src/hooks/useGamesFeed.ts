@@ -30,21 +30,26 @@ function deriveHsaStatus(narrative: string | null): HsaStatus {
 
 function deriveSignalTier(tier: string | null): SignalTier {
   if (!tier) return 'TRACKING';
+
   const map: Record<string, SignalTier> = {
+    A: 'DOUBLE NO-NARRATIVE RLM',
+    B: 'NO-NARRATIVE RLM',
+    C: 'WATCH',
     'DOUBLE NO-NARRATIVE RLM': 'DOUBLE NO-NARRATIVE RLM',
     'NO-NARRATIVE RLM': 'NO-NARRATIVE RLM',
     'STEAM MOVE': 'STEAM MOVE',
     'BOOK SHADE': 'BOOK SHADE',
     'FROZEN LINE': 'FROZEN LINE',
     'CONTRA MOVE': 'CONTRA MOVE',
-    'WATCH': 'WATCH',
-    'TRACKING': 'TRACKING',
+    WATCH: 'WATCH',
+    TRACKING: 'TRACKING',
     'DOUBLE RLM': 'DOUBLE NO-NARRATIVE RLM',
     'PRIME RLM ENHANCED': 'NO-NARRATIVE RLM',
     'PRIME RLM CONFIRMED': 'NO-NARRATIVE RLM',
     'PRIME RLM UNCONFIRMED': 'WATCH',
     'FROZEN LINE (65%+ money confirmed)': 'FROZEN LINE',
   };
+
   return map[tier] ?? 'TRACKING';
 }
 
@@ -53,7 +58,8 @@ function normalizeTeamName(name: string | null | undefined): string {
 
   const raw = name
     .toLowerCase()
-    .replace(/[.'’-]/g, '')
+    .replace(/[.'’()-]/g, '')
+    .replace(/&/g, 'and')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -61,7 +67,6 @@ function normalizeTeamName(name: string | null | undefined): string {
     ny: 'new york knicks',
     'new york': 'new york knicks',
     lal: 'los angeles lakers',
-    lakers: 'los angeles lakers',
     lac: 'la clippers',
     'los angeles clippers': 'la clippers',
     'la clippers': 'la clippers',
@@ -83,25 +88,90 @@ function normalizeTeamName(name: string | null | undefined): string {
     det: 'detroit pistons',
     tor: 'toronto raptors',
     dal: 'dallas mavericks',
-    md: 'maryland terrapins',
-    ill: 'illinois fighting illini',
-    neb: 'nebraska cornhuskers',
-    iowa: 'iowa hawkeyes',
-    mich: 'michigan wolverines',
-    msu: 'michigan state spartans',
-    'saint marys gaels': 'saint marys gaels',
-    'st marys gaels': 'saint marys gaels',
+    md: 'maryland',
+    ill: 'illinois',
+    neb: 'nebraska',
+    iowa: 'iowa',
+    mich: 'michigan',
+    msu: 'michigan state',
+    byu: 'brigham young',
+    uconn: 'connecticut',
+    unc: 'north carolina',
+    usc: 'southern california',
+    vcu: 'virginia commonwealth',
+    smu: 'southern methodist',
+    tcu: 'texas christian',
+    lsu: 'louisiana state',
+    'ole miss': 'mississippi',
+    'st marys': 'saint marys',
+    'st marys gaels': 'saint marys',
+    'saint marys gaels': 'saint marys',
+    'saint marys': 'saint marys',
+    etsu: 'east tennessee state',
+    'furman paladins': 'furman',
+    'troy trojans': 'troy',
+    'georgia southern eagles': 'georgia southern',
   };
 
   return aliases[raw] ?? raw;
 }
 
-function buildMatchKey(sportOrLeague: string, homeTeam: string, awayTeam: string): string {
+function buildMatchKey(leagueOrSport: string, homeTeam: string, awayTeam: string): string {
   return [
-    sportOrLeague,
+    leagueOrSport,
     normalizeTeamName(homeTeam),
     normalizeTeamName(awayTeam),
   ].join('|');
+}
+
+function hoursApart(a: string, b: string): number {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 3600000;
+}
+
+function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
+  const matchingLeague = oddsRows.filter((o) => o.league === tipoff.league);
+
+  const exactTeamMatches = matchingLeague.filter((o) => {
+    return (
+      normalizeTeamName(o.home_team) === normalizeTeamName(tipoff.home_team) &&
+      normalizeTeamName(o.away_team) === normalizeTeamName(tipoff.away_team)
+    );
+  });
+
+  const candidateRows = exactTeamMatches.length ? exactTeamMatches : matchingLeague.filter((o) => {
+    return (
+      normalizeTeamName(o.home_team).includes(normalizeTeamName(tipoff.home_team)) ||
+      normalizeTeamName(tipoff.home_team).includes(normalizeTeamName(o.home_team)) ||
+      normalizeTeamName(o.away_team).includes(normalizeTeamName(tipoff.away_team)) ||
+      normalizeTeamName(tipoff.away_team).includes(normalizeTeamName(o.away_team))
+    );
+  });
+
+  if (!candidateRows.length) {
+    return { opening: null, current: null };
+  }
+
+  const sortedByGameTime = candidateRows
+    .map((o) => ({
+      ...o,
+      _timeDiff: hoursApart(o.game_time, tipoff.game_time),
+    }))
+    .sort((a, b) => a._timeDiff - b._timeDiff);
+
+  const nearestGroup = sortedByGameTime.filter((o) => o._timeDiff <= Math.max(3, sortedByGameTime[0]._timeDiff + 0.01));
+
+  const byFetchedDesc = [...nearestGroup].sort(
+    (a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime()
+  );
+
+  const byFetchedAsc = [...nearestGroup].sort(
+    (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
+  );
+
+  return {
+    current: byFetchedDesc[0] ?? null,
+    opening: byFetchedAsc[0] ?? null,
+  };
 }
 
 export function useGamesFeed() {
@@ -111,132 +181,121 @@ export function useGamesFeed() {
 
   const fetchGames = useCallback(async () => {
     try {
-      const { data: tipoffs } = await supabase
-        .from('tipoff_snapshots')
-        .select('*')
-        .order('game_time', { ascending: true });
+      const [
+        tipoffRes,
+        alertsRes,
+        oddsRes,
+        analysesRes,
+        scoresRes,
+      ] = await Promise.all([
+        supabase.from('tipoff_snapshots').select('*').order('game_time', { ascending: true }),
+        supabase.from('rlm_alerts').select('*').order('detected_at', { ascending: false }),
+        supabase.from('odds_snapshots').select('*').order('fetched_at', { ascending: false }),
+        supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
+        supabase.from('game_scores').select('*').order('id', { ascending: false }),
+      ]);
 
-      const { data: alerts } = await supabase
-        .from('rlm_alerts')
-        .select('*')
-        .order('detected_at', { ascending: false });
+      const tipoffs = tipoffRes.data ?? [];
+      const alerts = alertsRes.data ?? [];
+      const odds = oddsRes.data ?? [];
+      const analyses = analysesRes.data ?? [];
+      const scores = scoresRes.data ?? [];
 
-      const { data: odds } = await supabase
-        .from('odds_snapshots')
-        .select('*')
-        .order('fetched_at', { ascending: false });
-
-      const { data: analyses } = await supabase
-        .from('claude_analyses')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      const { data: scores } = await supabase
-        .from('game_scores')
-        .select('*');
-
-      if (!tipoffs) return;
+      const scoreByGameId: Record<string, any> = {};
+      for (const s of scores) {
+        if (s.game_id && !scoreByGameId[s.game_id]) {
+          scoreByGameId[s.game_id] = s;
+        }
+      }
 
       const alertMap: Record<string, any> = {};
-      for (const a of alerts ?? []) {
+      for (const a of alerts) {
         const key = buildMatchKey(a.league, a.home_team, a.away_team);
         if (!alertMap[key]) alertMap[key] = a;
       }
 
-      const oddsMap: Record<string, { opening: any; current: any }> = {};
-      for (const o of odds ?? []) {
-        const key = buildMatchKey(o.league, o.home_team, o.away_team);
-        if (!oddsMap[key]) oddsMap[key] = { opening: null, current: null };
-        if (!oddsMap[key].current) oddsMap[key].current = o;
-      }
-
-      const oddsOldest = [...(odds ?? [])].reverse();
-      for (const o of oddsOldest) {
-        const key = buildMatchKey(o.league, o.home_team, o.away_team);
-        if (oddsMap[key]) oddsMap[key].opening = o;
-      }
-
       const analysisMap: Record<string, any> = {};
-      for (const a of analyses ?? []) {
+      for (const a of analyses) {
         const key = buildMatchKey(a.league, a.home_team, a.away_team);
         if (!analysisMap[key]) analysisMap[key] = a;
       }
 
-      const scoreMap: Record<string, any> = {};
-      for (const s of scores ?? []) {
-        const key = buildMatchKey(s.sport, s.home_team, s.away_team);
-        if (!scoreMap[key]) scoreMap[key] = s;
-      }
-
-      const seen = new Set<string>();
       const uniqueTipoffs: any[] = [];
+      const seenGameIds = new Set<string>();
+
       for (const t of tipoffs) {
-        const key = buildMatchKey(t.league, t.home_team, t.away_team);
-        if (!seen.has(key)) {
-          seen.add(key);
+        if (t.game_id && !seenGameIds.has(t.game_id)) {
+          seenGameIds.add(t.game_id);
           uniqueTipoffs.push(t);
         }
       }
 
       const gameViews: GameView[] = uniqueTipoffs.map((t) => {
-        const key = buildMatchKey(t.league, t.home_team, t.away_team);
-        const alert = alertMap[key];
-        const oddsEntry = oddsMap[key];
-        const analysis = analysisMap[key];
-        const score = scoreMap[key];
+        const fallbackKey = buildMatchKey(t.league, t.home_team, t.away_team);
 
-        const openSpread = oddsEntry?.opening?.spread ?? null;
-        const currSpread = oddsEntry?.current?.spread ?? null;
-        const lineMove =
-          openSpread !== null && currSpread !== null
-            ? parseFloat((currSpread - openSpread).toFixed(1))
+        const score = scoreByGameId[t.game_id] ?? null;
+        const alert = alertMap[fallbackKey] ?? null;
+        const analysis = analysisMap[fallbackKey] ?? null;
+        const bestOdds = findBestOddsMatch(t, odds);
+
+        const openingSpread = bestOdds.opening?.spread ?? null;
+        const currentSpread = bestOdds.current?.spread ?? null;
+
+        const lineMoveAmount =
+          openingSpread !== null && currentSpread !== null
+            ? parseFloat((currentSpread - openingSpread).toFixed(1))
             : null;
 
         const narrative = alert?.hsa_narrative ?? analysis?.narrative ?? null;
-        const derivedStatus = deriveStatusFromScore(score?.status, t.game_time);
+        const status = deriveStatusFromScore(score?.status, t.game_time);
 
-        const homeScore = score?.home_score;
-        const awayScore = score?.away_score;
-        const scoreSnippet =
-          homeScore !== null && homeScore !== undefined && awayScore !== null && awayScore !== undefined
-            ? `${t.away_team} ${awayScore} - ${t.home_team} ${homeScore}`
-            : null;
+        const hasScore =
+          score?.home_score !== null &&
+          score?.home_score !== undefined &&
+          score?.away_score !== null &&
+          score?.away_score !== undefined;
 
-        const displaySnippetParts = [];
-        if (scoreSnippet) displaySnippetParts.push(scoreSnippet);
-        if (score?.period !== null && score?.period !== undefined && derivedStatus === 'live') {
-          displaySnippetParts.push(`Period ${score.period}`);
+        let hsaSnippet: string | null = null;
+
+        if (hasScore) {
+          const scoreLine = `${t.away_team} ${score.away_score} - ${t.home_team} ${score.home_score}`;
+          const periodLine =
+            score?.period !== null && score?.period !== undefined && status === 'live'
+              ? ` • P${score.period}`
+              : status === 'final'
+                ? ' • Final'
+                : '';
+
+          hsaSnippet = `${scoreLine}${periodLine}`;
+        } else if (narrative && narrative !== 'NO_NARRATIVE') {
+          hsaSnippet = narrative.slice(0, 120);
         }
 
         return {
-          id: `${t.league}-${t.home_team}-${t.away_team}`,
+          id: String(t.game_id),
           league: t.league,
           awayTeam: t.away_team,
           homeTeam: t.home_team,
           gameTime: t.game_time,
-          status: derivedStatus,
+          status,
           timeToTipMinutes: deriveTimeToTip(t.game_time),
-          signalTier: deriveSignalTier(alert?.signal_tier ?? null),
-          sharpTeam: alert?.sharp_team ?? null,
+          signalTier: deriveSignalTier(alert?.signal_tier ?? t.signal_tier ?? null),
+          sharpTeam: alert?.sharp_team ?? t.sharp_team ?? null,
           fadeTeam: alert?.fade_team ?? null,
-          openingSpread: openSpread,
-          currentSpread: currSpread,
+          openingSpread,
+          currentSpread,
           closingSpread: null,
-          lineMoveAmount: alert?.line_move ?? lineMove,
+          lineMoveAmount: alert?.line_move ?? lineMoveAmount,
           booksAgreeing: alert?.books_agreeing ?? null,
           totalBooks: alert?.total_books ?? null,
           velocityPerHour: alert?.velocity_per_hour ?? null,
-          scenarioKey: alert?.scenario_key ?? null,
+          scenarioKey: alert?.scenario_key ?? t.scenario_key ?? null,
           hsaStatus: deriveHsaStatus(narrative),
-          hsaSnippet:
-            displaySnippetParts.length > 0
-              ? displaySnippetParts.join(' • ')
-              : (narrative && narrative !== 'NO_NARRATIVE')
-                ? narrative.slice(0, 120)
-                : null,
+          hsaSnippet,
           isLocked: t.is_locked ?? false,
           lastUpdated:
             alert?.detected_at ??
+            bestOdds.current?.fetched_at ??
             score?.finalized_at ??
             score?.scheduled_at ??
             t.created_at ??
@@ -259,5 +318,10 @@ export function useGamesFeed() {
     return () => clearInterval(interval);
   }, [fetchGames]);
 
-  return { games, loading, lastUpdated, refresh: fetchGames };
+  return {
+    games,
+    loading,
+    lastUpdated,
+    refresh: fetchGames,
+  };
 }
