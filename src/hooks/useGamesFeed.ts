@@ -197,13 +197,11 @@ export function useGamesFeed() {
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
       ]);
 
-      console.log('[feed] raw results:', {
-        tipoffs: tipoffRes.data?.length, tipoffErr: tipoffRes.error,
-        alerts: alertsRes.data?.length, alertErr: alertsRes.error,
-        odds: oddsRes.data?.length, oddsErr: oddsRes.error,
-        analyses: analysesRes.data?.length, analysesErr: analysesRes.error,
-        scores: scoresRes.data?.length, scoresErr: scoresRes.error,
-      });
+      console.log('[feed] tipoffs:', tipoffRes.data?.length, 'err:', tipoffRes.error?.message);
+      console.log('[feed] tipoff game_times:', tipoffRes.data?.map(t => t.game_time));
+      console.log('[feed] odds:', oddsRes.data?.length, 'err:', oddsRes.error?.message);
+      console.log('[feed] odds sample:', oddsRes.data?.slice(0, 3).map(o => ({ league: o.league, home: o.home_team, away: o.away_team, spread: o.spread, fetched_at: o.fetched_at })));
+      console.log('[feed] today filter value:', new Date().toLocaleDateString('en-CA'));
 
       const tipoffs = tipoffRes.data ?? [];
       const alerts = alertsRes.data ?? [];
