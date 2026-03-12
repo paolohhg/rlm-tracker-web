@@ -302,45 +302,46 @@ function GameCard({ game, ncaabLogos }: { game: GameView; ncaabLogos: Record<str
           padding: '12px',
         }}
       >
+        {/* Away team */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
           <TeamBadge league={game.league} teamName={game.awayTeam} ncaabLogos={ncaabLogos} />
           <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                color: '#f8fafc',
-                fontWeight: 900,
-                fontSize: '14px',
-                fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
-              }}
-            >
+            <div style={{ color: '#f8fafc', fontWeight: 900, fontSize: '13px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
               {game.awayTeam}
             </div>
+            {(game.status === 'live' || game.status === 'final') && game.awayScore !== null && (
+              <div style={{ color: game.status === 'live' ? '#22c55e' : '#f8fafc', fontWeight: 900, fontSize: '26px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif', lineHeight: 1 }}>
+                {game.awayScore}
+              </div>
+            )}
           </div>
         </div>
 
-        <div
-          style={{
-            color: '#64748b',
-            fontWeight: 900,
-            fontSize: '13px',
-            fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
-          }}
-        >
-          @
+        {/* Middle */}
+        <div style={{ textAlign: 'center' }}>
+          {game.status === 'live' && game.period ? (
+            <div style={{ color: '#22c55e', fontWeight: 900, fontSize: '11px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              <div>Q{game.period}</div>
+              {game.gameClock && <div>{game.gameClock}</div>}
+            </div>
+          ) : game.status === 'final' ? (
+            <div style={{ color: '#64748b', fontWeight: 900, fontSize: '11px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>FINAL</div>
+          ) : (
+            <div style={{ color: '#64748b', fontWeight: 900, fontSize: '13px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>@</div>
+          )}
         </div>
 
+        {/* Home team */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', minWidth: 0 }}>
           <div style={{ minWidth: 0, textAlign: 'right' }}>
-            <div
-              style={{
-                color: '#f8fafc',
-                fontWeight: 900,
-                fontSize: '14px',
-                fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
-              }}
-            >
+            <div style={{ color: '#f8fafc', fontWeight: 900, fontSize: '13px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
               {game.homeTeam}
             </div>
+            {(game.status === 'live' || game.status === 'final') && game.homeScore !== null && (
+              <div style={{ color: game.status === 'live' ? '#22c55e' : '#f8fafc', fontWeight: 900, fontSize: '26px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif', lineHeight: 1, textAlign: 'right' }}>
+                {game.homeScore}
+              </div>
+            )}
           </div>
           <TeamBadge league={game.league} teamName={game.homeTeam} ncaabLogos={ncaabLogos} />
         </div>

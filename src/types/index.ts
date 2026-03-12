@@ -14,6 +14,10 @@ export interface GameView {
   signalTier: SignalTier
   sharpTeam: string | null
   fadeTeam: string | null
+  homeScore: number | null
+  awayScore: number | null
+  period: number | null
+  gameClock: string | null
   openingSpread: number | null
   currentSpread: number | null
   closingSpread: number | null
