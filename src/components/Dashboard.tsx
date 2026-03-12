@@ -504,7 +504,12 @@ export function Dashboard() {
   }, [games, statusFilter, alertsOnly, search]);
 
   const strongestSignal = useMemo(() => {
-    const sorted = [...games].sort((a, b) => getSignalRank(b.signalTier) - getSignalRank(a.signalTier));
+    const upcoming = games.filter((g) => g.status === 'upcoming' || g.status === 'live');
+    const sorted = upcoming.sort((a, b) => {
+      const rankDiff = getSignalRank(b.signalTier) - getSignalRank(a.signalTier);
+      if (rankDiff !== 0) return rankDiff;
+      return a.timeToTipMinutes - b.timeToTipMinutes;
+    });
     return sorted[0] ?? null;
   }, [games]);
 
