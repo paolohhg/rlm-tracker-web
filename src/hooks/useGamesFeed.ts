@@ -151,20 +151,22 @@ function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
     return { opening: null, current: null };
   }
 
-  const sortedByGameTime = candidateRows
-    .map((o) => ({
-      ...o,
-      _timeDiff: hoursApart(o.game_time, tipoff.game_time),
-    }))
-    .sort((a, b) => a._timeDiff - b._timeDiff);
+  // Only filter by game_time proximity if odds rows actually have that field
+  const hasGameTime = candidateRows.some((o) => o.game_time != null);
+  const pool = hasGameTime
+    ? (() => {
+        const sorted = candidateRows
+          .map((o) => ({ ...o, _timeDiff: hoursApart(o.game_time, tipoff.game_time) }))
+          .sort((a, b) => a._timeDiff - b._timeDiff);
+        return sorted.filter((o) => o._timeDiff <= Math.max(3, sorted[0]._timeDiff + 0.01));
+      })()
+    : candidateRows;
 
-  const nearestGroup = sortedByGameTime.filter((o) => o._timeDiff <= Math.max(3, sortedByGameTime[0]._timeDiff + 0.01));
-
-  const byFetchedDesc = [...nearestGroup].sort(
+  const byFetchedDesc = [...pool].sort(
     (a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime()
   );
 
-  const byFetchedAsc = [...nearestGroup].sort(
+  const byFetchedAsc = [...pool].sort(
     (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
   );
 
@@ -207,6 +209,9 @@ export function useGamesFeed() {
           scoreByGameId[s.game_id] = s;
         }
       }
+
+      console.debug('[scores] rows fetched:', scores.length, scores[0]);
+      console.debug('[tipoffs] sample game_id:', tipoffs[0]?.game_id);
 
       const alertMap: Record<string, any> = {};
       for (const a of alerts) {
