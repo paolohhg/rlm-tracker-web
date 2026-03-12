@@ -226,11 +226,14 @@ export function useGamesFeed() {
       }
 
       const uniqueTipoffs: any[] = [];
-      const seenGameIds = new Set<string>();
+      const seenKeys = new Set<string>();
 
       for (const t of tipoffs) {
-        if (t.game_id && !seenGameIds.has(t.game_id)) {
-          seenGameIds.add(t.game_id);
+        const dedupKey = t.game_id
+          ? String(t.game_id)
+          : buildMatchKey(t.league, t.home_team, t.away_team);
+        if (!seenKeys.has(dedupKey)) {
+          seenKeys.add(dedupKey);
           uniqueTipoffs.push(t);
         }
       }
@@ -277,7 +280,7 @@ export function useGamesFeed() {
         }
 
         return {
-          id: String(t.game_id),
+          id: t.game_id ? String(t.game_id) : buildMatchKey(t.league, t.home_team, t.away_team),
           league: t.league,
           awayTeam: t.away_team,
           homeTeam: t.home_team,
