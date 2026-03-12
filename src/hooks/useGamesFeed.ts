@@ -197,6 +197,14 @@ export function useGamesFeed() {
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
       ]);
 
+      console.log('[feed] raw results:', {
+        tipoffs: tipoffRes.data?.length, tipoffErr: tipoffRes.error,
+        alerts: alertsRes.data?.length, alertErr: alertsRes.error,
+        odds: oddsRes.data?.length, oddsErr: oddsRes.error,
+        analyses: analysesRes.data?.length, analysesErr: analysesRes.error,
+        scores: scoresRes.data?.length, scoresErr: scoresRes.error,
+      });
+
       const tipoffs = tipoffRes.data ?? [];
       const alerts = alertsRes.data ?? [];
       const odds = oddsRes.data ?? [];
@@ -311,6 +319,7 @@ export function useGamesFeed() {
         };
       });
 
+      console.log('[feed] uniqueTipoffs:', uniqueTipoffs.length, 'gameViews:', gameViews.length, gameViews[0]);
       setGames(gameViews);
       setLastUpdated(new Date());
     } catch (err) {
