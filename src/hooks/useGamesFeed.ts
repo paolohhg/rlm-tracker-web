@@ -176,8 +176,10 @@ function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
   };
 }
 
-async function fetchEspnScores(): Promise<Record<string, { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null }>> {
-  const map: Record<string, { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null }> = {};
+type EspnScoreEntry = { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null };
+
+async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
+  const map: Record<string, EspnScoreEntry> = {};
 
   const urls = [
     'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
@@ -194,19 +196,41 @@ async function fetchEspnScores(): Promise<Record<string, { homeScore: number; aw
         const home = comp.competitors?.find((c: any) => c.homeAway === 'home');
         const away = comp.competitors?.find((c: any) => c.homeAway === 'away');
         if (!home || !away) continue;
+
         const statusType = comp.status?.type?.name ?? '';
         const espnStatus =
           statusType === 'STATUS_FINAL' ? 'final' :
           statusType === 'STATUS_IN_PROGRESS' || statusType === 'STATUS_HALFTIME' ? 'live' :
           'upcoming';
-        const key = normalizeTeamName(home.team.displayName) + '|' + normalizeTeamName(away.team.displayName);
-        map[key] = {
+
+        const entry: EspnScoreEntry = {
           homeScore: parseInt(home.score ?? '0', 10),
           awayScore: parseInt(away.score ?? '0', 10),
           status: espnStatus,
           period: comp.status?.period ?? null,
           clock: comp.status?.displayClock ?? null,
         };
+
+        // Index under all name variations so DB names match regardless of format
+        const homeVariants = [
+          home.team.displayName,
+          home.team.shortDisplayName,
+          home.team.location,
+          home.team.name,
+        ].filter(Boolean).map((n: string) => normalizeTeamName(n));
+
+        const awayVariants = [
+          away.team.displayName,
+          away.team.shortDisplayName,
+          away.team.location,
+          away.team.name,
+        ].filter(Boolean).map((n: string) => normalizeTeamName(n));
+
+        for (const h of homeVariants) {
+          for (const a of awayVariants) {
+            map[`${h}|${a}`] = entry;
+          }
+        }
       }
     } catch { /* silently skip if ESPN is unreachable */ }
   }));
