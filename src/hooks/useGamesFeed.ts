@@ -176,6 +176,44 @@ function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
   };
 }
 
+async function fetchEspnScores(): Promise<Record<string, { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null }>> {
+  const map: Record<string, { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null }> = {};
+
+  const urls = [
+    'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
+    'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard',
+  ];
+
+  await Promise.all(urls.map(async (url) => {
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      for (const event of data.events ?? []) {
+        const comp = event.competitions?.[0];
+        if (!comp) continue;
+        const home = comp.competitors?.find((c: any) => c.homeAway === 'home');
+        const away = comp.competitors?.find((c: any) => c.homeAway === 'away');
+        if (!home || !away) continue;
+        const statusType = comp.status?.type?.name ?? '';
+        const espnStatus =
+          statusType === 'STATUS_FINAL' ? 'final' :
+          statusType === 'STATUS_IN_PROGRESS' || statusType === 'STATUS_HALFTIME' ? 'live' :
+          'upcoming';
+        const key = normalizeTeamName(home.team.displayName) + '|' + normalizeTeamName(away.team.displayName);
+        map[key] = {
+          homeScore: parseInt(home.score ?? '0', 10),
+          awayScore: parseInt(away.score ?? '0', 10),
+          status: espnStatus,
+          period: comp.status?.period ?? null,
+          clock: comp.status?.displayClock ?? null,
+        };
+      }
+    } catch { /* silently skip if ESPN is unreachable */ }
+  }));
+
+  return map;
+}
+
 export function useGamesFeed() {
   const [games, setGames] = useState<GameView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,12 +227,14 @@ export function useGamesFeed() {
         oddsRes,
         analysesRes,
         scoresRes,
+        espnScores,
       ] = await Promise.all([
         supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date().toLocaleDateString('en-CA')).order('game_time', { ascending: true }),
         supabase.from('rlm_alerts').select('*').order('detected_at', { ascending: false }),
         supabase.from('odds_snapshots').select('*').order('fetched_at', { ascending: false }),
         supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
+        fetchEspnScores(),
       ]);
 
       console.log('[feed] tipoffs:', tipoffRes.data?.length, 'err:', tipoffRes.error?.message);
@@ -252,6 +292,10 @@ export function useGamesFeed() {
         const analysis = analysisMap[fallbackKey] ?? null;
         const bestOdds = findBestOddsMatch(t, odds);
 
+        // ESPN live score — keyed by home|away normalized names
+        const espnKey = normalizeTeamName(t.home_team) + '|' + normalizeTeamName(t.away_team);
+        const espn = espnScores[espnKey] ?? null;
+
         const openingSpread = bestOdds.opening?.spread ?? null;
         const currentSpread = bestOdds.current?.spread ?? null;
 
@@ -261,26 +305,22 @@ export function useGamesFeed() {
             : null;
 
         const narrative = alert?.hsa_narrative ?? analysis?.narrative ?? null;
-        const status = deriveStatusFromScore(score?.status, t.game_time);
 
-        const hasScore =
-          score?.home_score !== null &&
-          score?.home_score !== undefined &&
-          score?.away_score !== null &&
-          score?.away_score !== undefined;
+        // ESPN is the fastest source — prefer it over DB status
+        const status: GameStatus = espn
+          ? espn.status as GameStatus
+          : deriveStatusFromScore(score?.status, t.game_time);
 
         let hsaSnippet: string | null = null;
 
-        if (hasScore) {
-          const scoreLine = `${t.away_team} ${score.away_score} - ${t.home_team} ${score.home_score}`;
-          const periodLine =
-            score?.period !== null && score?.period !== undefined && status === 'live'
-              ? ` • P${score.period}`
-              : status === 'final'
-                ? ' • Final'
-                : '';
-
-          hsaSnippet = `${scoreLine}${periodLine}`;
+        if (espn && (espn.status === 'live' || espn.status === 'final')) {
+          const clock = espn.status === 'live' && espn.clock ? ` ${espn.clock}` : '';
+          const period = espn.period ? ` Q${espn.period}${clock}` : '';
+          const suffix = espn.status === 'final' ? ' • Final' : period;
+          hsaSnippet = `${t.away_team} ${espn.awayScore} - ${t.home_team} ${espn.homeScore}${suffix}`;
+        } else if (score?.home_score != null && score?.away_score != null) {
+          const periodLine = score?.period != null && status === 'live' ? ` • P${score.period}` : status === 'final' ? ' • Final' : '';
+          hsaSnippet = `${t.away_team} ${score.away_score} - ${t.home_team} ${score.home_score}${periodLine}`;
         } else if (narrative && narrative !== 'NO_NARRATIVE') {
           hsaSnippet = narrative.slice(0, 120);
         }
