@@ -168,16 +168,18 @@ function fetchNcaabLogoMap(): Promise<Record<string, string>> {
           }
         }
         ncaabLogoCache = map;
+        console.log('[logos] NCAAB map built, teams:', Object.keys(map).length, 'sample:', Object.keys(map).slice(0, 5));
         return map;
       })
-      .catch(() => ({}));
+      .catch((e) => { console.error('[logos] ESPN fetch failed:', e); return {}; });
   }
   return ncaabLogoCachePromise;
 }
 
 function getTeamLogo(league: string, teamName: string, ncaabLogos: Record<string, string>) {
-  if (league === 'NBA') return getNbaLogoUrl(teamName);
-  if (league === 'NCAAB') return ncaabLogos[normalizeKey(teamName)] ?? null;
+  const l = league.toUpperCase();
+  if (l === 'NBA') return getNbaLogoUrl(teamName);
+  if (l === 'NCAAB') return ncaabLogos[normalizeKey(teamName)] ?? null;
   return null;
 }
 
