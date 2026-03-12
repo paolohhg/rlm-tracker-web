@@ -376,6 +376,9 @@ export function useGamesFeed() {
           booksAgreeing: alert?.books_agreeing ?? null,
           totalBooks: alert?.total_books ?? null,
           velocityPerHour: alert?.velocity_per_hour ?? null,
+          publicBetsPct: alert?.public_bets_pct ?? alert?.bets_pct ?? null,
+          publicMoneyPct: alert?.public_money_pct ?? alert?.money_pct ?? null,
+          sharpMoneyPct: alert?.sharp_money_pct ?? null,
           scenarioKey: alert?.scenario_key ?? t.scenario_key ?? null,
           hsaStatus: deriveHsaStatus(narrative),
           hsaSnippet,
@@ -390,7 +393,8 @@ export function useGamesFeed() {
         };
       });
 
-      console.log('[feed] uniqueTipoffs:', uniqueTipoffs.length, 'gameViews:', gameViews.length, gameViews[0]);
+      console.log('[feed] sample alert keys:', alerts[0] ? Object.keys(alerts[0]) : 'no alerts');
+      console.log('[feed] uniqueTipoffs:', uniqueTipoffs.length, 'gameViews:', gameViews.length);
       setGames(gameViews);
       setLastUpdated(new Date());
     } catch (err) {

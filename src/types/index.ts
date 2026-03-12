@@ -25,6 +25,9 @@ export interface GameView {
   booksAgreeing: number | null
   totalBooks: number | null
   velocityPerHour: number | null
+  publicBetsPct: number | null
+  publicMoneyPct: number | null
+  sharpMoneyPct: number | null
   scenarioKey: string | null
   hsaStatus: HsaStatus
   hsaSnippet: string | null

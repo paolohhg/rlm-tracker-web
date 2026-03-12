@@ -443,6 +443,40 @@ function GameCard({ game, ncaabLogos }: { game: GameView; ncaabLogos: Record<str
         </div>
       </div>
 
+      {/* Betting splits */}
+      {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (
+        <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={cardLabelStyle()}>Betting Splits</div>
+          {game.publicBetsPct !== null && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '3px' }}>
+                <span>Public Bets</span>
+                <span>{game.publicBetsPct}% public</span>
+              </div>
+              <div style={{ background: '#1e293b', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${game.publicBetsPct}%`, height: '100%', background: '#3b82f6', borderRadius: '4px' }} />
+              </div>
+            </div>
+          )}
+          {game.publicMoneyPct !== null && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '3px' }}>
+                <span>Public Money</span>
+                <span>{game.publicMoneyPct}% public</span>
+              </div>
+              <div style={{ background: '#1e293b', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
+                <div style={{ width: `${game.publicMoneyPct}%`, height: '100%', background: '#8b5cf6', borderRadius: '4px' }} />
+              </div>
+            </div>
+          )}
+          {game.booksAgreeing !== null && game.totalBooks !== null && (
+            <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>
+              {game.booksAgreeing}/{game.totalBooks} books agreeing • {game.velocityPerHour !== null ? `${game.velocityPerHour}/hr velocity` : ''}
+            </div>
+          )}
+        </div>
+      )}
+
       <div>
         <div style={cardLabelStyle()}>Intel</div>
         <div
