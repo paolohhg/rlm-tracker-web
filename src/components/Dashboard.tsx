@@ -518,7 +518,7 @@ function GameCard({ game }: { game: GameView }) {
 export function Dashboard() {
   const { games, loading, lastUpdated, refresh } = useGamesFeed();
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('upcoming');
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
 
