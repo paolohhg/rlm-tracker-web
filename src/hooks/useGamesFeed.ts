@@ -7,7 +7,7 @@ function deriveFallbackStatus(gameTime: string): GameStatus {
   const tip = new Date(gameTime).getTime();
   const diff = tip - now;
   if (diff > 0) return 'upcoming';
-  if (diff > -3 * 60 * 60 * 1000) return 'live';
+  if (diff > -2 * 60 * 60 * 1000) return 'live';
   return 'final';
 }
 
@@ -309,10 +309,10 @@ export function useGamesFeed() {
         const narrative = alert?.hsa_narrative ?? analysis?.narrative ?? null;
 
         // ESPN is the fastest source — prefer it over DB status
-        // If ESPN has no data and game started 3+ hours ago, force final
+        // ESPN is authoritative. Without ESPN data, force final after 2h (games rarely exceed 2.5h).
         const status: GameStatus = espn
           ? espn.status as GameStatus
-          : minutesFromNow < -180
+          : minutesFromNow < -120
             ? 'final'
             : deriveStatusFromScore(score?.status, t.game_time);
 
