@@ -504,8 +504,10 @@ export function Dashboard() {
   }, [games, statusFilter, alertsOnly, search]);
 
   const strongestSignal = useMemo(() => {
-    const upcoming = games.filter((g) => g.status === 'upcoming' || g.status === 'live');
-    const sorted = upcoming.sort((a, b) => {
+    const candidates = games.filter(
+      (g) => (g.status === 'upcoming' || g.status === 'live') && isAlertSignal(g.signalTier)
+    );
+    const sorted = candidates.sort((a, b) => {
       const rankDiff = getSignalRank(b.signalTier) - getSignalRank(a.signalTier);
       if (rankDiff !== 0) return rankDiff;
       return a.timeToTipMinutes - b.timeToTipMinutes;
@@ -636,7 +638,7 @@ export function Dashboard() {
               </div>
             </div>
           ) : (
-            <div style={{ color: '#94a3b8', marginTop: '8px', fontWeight: 800 }}>No games loaded yet</div>
+            <div style={{ color: '#94a3b8', marginTop: '8px', fontWeight: 800 }}>No active signals right now</div>
           )}
         </div>
 

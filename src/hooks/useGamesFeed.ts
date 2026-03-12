@@ -296,6 +296,8 @@ export function useGamesFeed() {
         const espnKey = normalizeTeamName(t.home_team) + '|' + normalizeTeamName(t.away_team);
         const espn = espnScores[espnKey] ?? null;
 
+        const minutesFromNow = deriveTimeToTip(t.game_time);
+
         const openingSpread = bestOdds.opening?.spread ?? null;
         const currentSpread = bestOdds.current?.spread ?? null;
 
@@ -307,9 +309,12 @@ export function useGamesFeed() {
         const narrative = alert?.hsa_narrative ?? analysis?.narrative ?? null;
 
         // ESPN is the fastest source — prefer it over DB status
+        // If ESPN has no data and game started 3+ hours ago, force final
         const status: GameStatus = espn
           ? espn.status as GameStatus
-          : deriveStatusFromScore(score?.status, t.game_time);
+          : minutesFromNow < -180
+            ? 'final'
+            : deriveStatusFromScore(score?.status, t.game_time);
 
         let hsaSnippet: string | null = null;
 
