@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useGamesFeed } from '../hooks/useGamesFeed';
 import type { GameView } from '../types';
 
@@ -145,95 +145,39 @@ function getNbaLogoUrl(teamName: string) {
   return logos[normalizeKey(teamName)] ?? null;
 }
 
-function getCollegeLogoUrl(teamName: string) {
-  const ncaabIds: Record<string, number> = {
-    alabama: 333, alabamacrimsontide: 333,
-    arizona: 12, arizonawildcats: 12,
-    arizonastate: 9, arizonastatesundevils: 9,
-    arkansas: 8, arkansasrazorbacks: 8,
-    auburn: 2, auburntigers: 2,
-    baylor: 239, baylorbears: 239,
-    brighamyoung: 252, byu: 252, byucougars: 252,
-    cincinnati: 2132, cincinnatibearcats: 2132,
-    clemson: 228, clemsontigers: 228,
-    colorado: 38, coloradobuffaloes: 38,
-    connecticut: 41, uconn: 41, uconnhuskies: 41, connecticuthuskies: 41,
-    creighton: 156, creightonbluejays: 156,
-    duke: 150, dukebluedevils: 150,
-    florida: 57, floridagators: 57,
-    floridastate: 52, floridastatesseminoles: 52,
-    georgetown: 46, georgetownhoyas: 46,
-    gonzaga: 2250, gonzagabulldogs: 2250,
-    illinois: 356, illinoisfightingillini: 356,
-    indiana: 84, indianahoosiers: 84,
-    iowa: 2294, iowahawkeyes: 2294,
-    iowastate: 66, iowastatecyclones: 66,
-    kansas: 2305, kansasjayhawks: 2305,
-    kansasstate: 2306, kansasstatewildcats: 2306,
-    kentucky: 96, kentuckywildcats: 96,
-    louisville: 97, louisvillecardinals: 97,
-    louisianastate: 99, lsu: 99, lsutigers: 99,
-    marquette: 269, marquettegoldenengles: 269,
-    maryland: 120, marylandterrapins: 120,
-    memphis: 235, memphistigers: 235,
-    michigan: 130, michiganwolverines: 130,
-    michiganstate: 127, michiganstatespartans: 127,
-    minnesota: 135, minnesotgoldengophers: 135,
-    mississippi: 145, olemiss: 145, mississippirebels: 145,
-    mississippistate: 344, mississippistatebulldogs: 344,
-    missouri: 142, missouritigers: 142,
-    nebraska: 158, nebraskacornhuskers: 158,
-    northcarolina: 153, unc: 153, northcarolinatarheels: 153,
-    ncstate: 152, northcarolinastate: 152, northcarolinastatewolfpack: 152,
-    notredame: 87, notredamefightingirish: 87,
-    ohiostate: 194, ohiostatebuckeyes: 194,
-    oklahoma: 201, oklahomasooners: 201,
-    oklahomastate: 197, oklahomastatecowboys: 197,
-    oregon: 2483, oregonducks: 2483,
-    oregonstate: 204, oregonstatebeavers: 204,
-    pennstate: 213, pennstatenittanylions: 213,
-    pittsburgh: 221, pitt: 221, pittsburghpanthers: 221,
-    purdue: 2509, purdueboilermakers: 2509,
-    rutgers: 164, rutgersscarletkights: 164,
-    saintlouis: 139, saintlouisbillikens: 139,
-    saintmarys: 2608, saintmarysgaels: 2608, stmarys: 2608, stmarysgaels: 2608,
-    santaclara: 2541, santaclarabroncos: 2541,
-    sandiegostate: 21, sandiegostateaztecs: 21,
-    setonhall: 2550, setonhallpirates: 2550,
-    southernmethodist: 2567, smu: 2567, smumustangs: 2567,
-    stanford: 24, stanfordcardinal: 24,
-    syracuse: 183, syracuseorange: 183,
-    texaschristian: 2628, tcu: 2628, tcuhornedfrogs: 2628,
-    tennessee: 2633, tennesseevolunteers: 2633,
-    texas: 251, texaslonghorns: 251,
-    texasampm: 245, texasam: 245, texasamaggies: 245,
-    texastech: 2641, texastechredraiders: 2641,
-    ucla: 26, uclabruins: 26,
-    southerncalifornia: 30, usc: 30, usctrojans: 30,
-    utah: 254, utahutes: 254,
-    vanderbilt: 238, vanderbiltcommodores: 238,
-    villanova: 222, villanowawildcats: 222,
-    virginia: 258, virginiacavaliers: 258,
-    virginiacommonwealth: 2670, vcu: 2670, vcurams: 2670,
-    virginiatech: 259, virginiatechhokies: 259,
-    wakeforest: 154, wakeforestdemondeacons: 154,
-    washington: 264, washingtonhuskies: 264,
-    westvirginia: 277, westvirginiamountaineers: 277,
-    wisconsin: 275, wisconsinbadgers: 275,
-    xavier: 2752, xaviermusketeers: 2752,
-    furman: 231, furmanpaladins: 231,
-    troy: 2653, troytrojans: 2653,
-    georgiasouthern: 290, georgiasoutherneagles: 290,
-    easttenesseestate: 2193, etsu: 2193,
-  };
+// Module-level cache — fetched once, reused across renders
+let ncaabLogoCache: Record<string, string> | null = null;
+let ncaabLogoCachePromise: Promise<Record<string, string>> | null = null;
 
-  const id = ncaabIds[normalizeKey(teamName)];
-  return id ? `https://a.espncdn.com/i/teamlogos/ncaa/500/${id}.png` : null;
+function fetchNcaabLogoMap(): Promise<Record<string, string>> {
+  if (ncaabLogoCache) return Promise.resolve(ncaabLogoCache);
+  if (!ncaabLogoCachePromise) {
+    ncaabLogoCachePromise = fetch(
+      'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams?limit=500'
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        const map: Record<string, string> = {};
+        for (const entry of data.sports?.[0]?.leagues?.[0]?.teams ?? []) {
+          const team = entry.team;
+          const logo = team.logos?.[0]?.href ?? null;
+          if (logo) {
+            map[normalizeKey(team.displayName)] = logo;
+            if (team.shortDisplayName) map[normalizeKey(team.shortDisplayName)] = logo;
+            if (team.nickname) map[normalizeKey(team.nickname)] = logo;
+          }
+        }
+        ncaabLogoCache = map;
+        return map;
+      })
+      .catch(() => ({}));
+  }
+  return ncaabLogoCachePromise;
 }
 
-function getTeamLogo(league: string, teamName: string) {
+function getTeamLogo(league: string, teamName: string, ncaabLogos: Record<string, string>) {
   if (league === 'NBA') return getNbaLogoUrl(teamName);
-  if (league === 'NCAAB') return getCollegeLogoUrl(teamName);
+  if (league === 'NCAAB') return ncaabLogos[normalizeKey(teamName)] ?? null;
   return null;
 }
 
@@ -246,8 +190,8 @@ function getTeamInitials(teamName: string) {
     .toUpperCase();
 }
 
-function TeamBadge({ league, teamName }: { league: string; teamName: string }) {
-  const logo = getTeamLogo(league, teamName);
+function TeamBadge({ league, teamName, ncaabLogos }: { league: string; teamName: string; ncaabLogos: Record<string, string> }) {
+  const logo = getTeamLogo(league, teamName, ncaabLogos);
 
   if (logo) {
     return (
@@ -287,7 +231,7 @@ function TeamBadge({ league, teamName }: { league: string; teamName: string }) {
   );
 }
 
-function GameCard({ game }: { game: GameView }) {
+function GameCard({ game, ncaabLogos }: { game: GameView; ncaabLogos: Record<string, string> }) {
   const signalBg = signalColor(game.signalTier);
 
   return (
@@ -357,7 +301,7 @@ function GameCard({ game }: { game: GameView }) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-          <TeamBadge league={game.league} teamName={game.awayTeam} />
+          <TeamBadge league={game.league} teamName={game.awayTeam} ncaabLogos={ncaabLogos} />
           <div style={{ minWidth: 0 }}>
             <div
               style={{
@@ -396,7 +340,7 @@ function GameCard({ game }: { game: GameView }) {
               {game.homeTeam}
             </div>
           </div>
-          <TeamBadge league={game.league} teamName={game.homeTeam} />
+          <TeamBadge league={game.league} teamName={game.homeTeam} ncaabLogos={ncaabLogos} />
         </div>
       </div>
 
@@ -517,6 +461,11 @@ function GameCard({ game }: { game: GameView }) {
 
 export function Dashboard() {
   const { games, loading, lastUpdated, refresh } = useGamesFeed();
+  const [ncaabLogos, setNcaabLogos] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    fetchNcaabLogoMap().then(setNcaabLogos);
+  }, []);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('upcoming');
   const [alertsOnly, setAlertsOnly] = useState(false);
@@ -755,7 +704,7 @@ export function Dashboard() {
             }}
           >
             {filteredGames.map((game) => (
-              <GameCard key={game.id} game={game} />
+              <GameCard key={game.id} game={game} ncaabLogos={ncaabLogos} />
             ))}
           </div>
         )}
