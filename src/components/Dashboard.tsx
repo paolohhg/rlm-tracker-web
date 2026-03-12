@@ -544,7 +544,7 @@ export function Dashboard() {
                 fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
               }}
             >
-              RLM Tracker
+              RLM Tracker v3
             </h1>
             <div style={{ color: '#94a3b8', marginTop: '6px', fontSize: '14px', fontWeight: 800 }}>
               Live market movement intelligence
@@ -677,10 +677,10 @@ export function Dashboard() {
               fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
             }}
           >
-            <option value="all">All Games</option>
             <option value="upcoming">Upcoming</option>
             <option value="live">Live</option>
             <option value="final">Final</option>
+            <option value="all">All Games</option>
           </select>
 
           <label style={{ display: 'flex', gap: '8px', alignItems: 'center', color: '#cbd5e1', fontWeight: 800 }}>
