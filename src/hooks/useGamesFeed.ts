@@ -118,7 +118,7 @@ function normalizeTeamName(name: string | null | undefined): string {
 
 function buildMatchKey(leagueOrSport: string, homeTeam: string, awayTeam: string): string {
   return [
-    leagueOrSport,
+    leagueOrSport.toLowerCase(),
     normalizeTeamName(homeTeam),
     normalizeTeamName(awayTeam),
   ].join('|');
@@ -129,7 +129,7 @@ function hoursApart(a: string, b: string): number {
 }
 
 function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
-  const matchingLeague = oddsRows.filter((o) => o.league === tipoff.league);
+  const matchingLeague = oddsRows.filter((o) => String(o.league).toLowerCase() === String(tipoff.league).toLowerCase());
 
   const exactTeamMatches = matchingLeague.filter((o) => {
     return (
