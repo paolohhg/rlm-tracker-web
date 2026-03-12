@@ -1,6 +1,7 @@
 import type { GameView } from '../types';
 import { SignalBadge } from './SignalBadge';
 import { HsaBadge } from './HsaBadge';
+import { TeamLogo } from './TeamLogo';
 
 interface Props {
   game: GameView;
@@ -79,9 +80,11 @@ export function GameCard({ game }: Props) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <TeamLogo teamName={game.awayTeam} league={game.league} />
             <span style={{ fontSize: '15px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.01em', fontFamily: '"DM Mono", monospace' }}>
               {game.awayTeam} <span style={{ color: '#475569', fontWeight: 400 }}>@</span> {game.homeTeam}
             </span>
+            <TeamLogo teamName={game.homeTeam} league={game.league} />
             <span style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', background: 'rgba(100,116,139,0.1)', border: '1px solid rgba(100,116,139,0.15)', padding: '1px 6px', borderRadius: '3px', letterSpacing: '0.05em' }}>
               {game.league}
             </span>

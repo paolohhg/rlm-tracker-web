@@ -190,7 +190,7 @@ export function useGamesFeed() {
         analysesRes,
         scoresRes,
       ] = await Promise.all([
-        supabase.from('tipoff_snapshots').select('*').order('game_time', { ascending: true }),
+        supabase.from('tipoff_snapshots').select('*').gte('game_time', (() => { const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0,0,0,0); return d.toISOString(); })()).order('game_time', { ascending: true }),
         supabase.from('rlm_alerts').select('*').order('detected_at', { ascending: false }),
         supabase.from('odds_snapshots').select('*').order('fetched_at', { ascending: false }),
         supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
