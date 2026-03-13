@@ -623,12 +623,12 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
 
       {/* Betting splits */}
       {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (() => {
-        // For NCAAB use first word (school), for NBA use all but last word (city)
         const shortName = (name: string) => {
           const parts = name.split(' ');
           if (parts.length <= 2) return parts[0];
-          // NBA teams: "Los Angeles Lakers" → "Los Angeles"; NCAAB: "Alabama Crimson Tide" → "Alabama"
-          return game.league === 'NBA' ? parts.slice(0, -1).join(' ') : parts[0];
+          // NBA: "Los Angeles Lakers" → "Los Angeles"; NCAAB: drop last word (mascot)
+          // For NCAAB 3+ word names: "Ole Miss Rebels" → "Ole Miss", "Alabama Crimson Tide" → "Alabama Crimson"
+          return parts.slice(0, -1).join(' ');
         };
         const awayShort = shortName(game.awayTeam);
         const homeShort = shortName(game.homeTeam);
