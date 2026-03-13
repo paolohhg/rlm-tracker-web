@@ -364,7 +364,7 @@ export function useGamesFeed() {
             ? parseFloat((currentSpread - openingSpread).toFixed(1))
             : null;
 
-        const narrative = alert?.hsa_narrative ?? analysis?.narrative ?? null;
+        const narrative = alert?.hsa_narrative ?? analysis?.analysis ?? analysis?.narrative ?? null;
 
         // ESPN is the fastest source — prefer it over DB status
         // ESPN is authoritative. Without ESPN data, force final after 2h (games rarely exceed 2.5h).

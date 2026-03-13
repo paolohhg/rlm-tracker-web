@@ -1,5 +1,6 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useGamesFeed } from '../hooks/useGamesFeed';
+import { useGenerateHsa } from '../hooks/useGenerateHsa';
 import type { GameView } from '../types';
 
 type StatusFilter = 'all' | 'upcoming' | 'live' | 'final';
@@ -233,7 +234,24 @@ function TeamBadge({ league, teamName, ncaabLogos }: { league: string; teamName:
   );
 }
 
-function HsaModal({ game, onClose }: { game: GameView; onClose: () => void }) {
+function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () => void; onRefresh: () => void }) {
+  const [localNarrative, setLocalNarrative] = useState<string | null>(game.hsaNarrative);
+  const { generate, loading, error } = useGenerateHsa(onRefresh);
+
+  const handleGenerate = useCallback(async () => {
+    const result = await generate({
+      league: game.league,
+      home_team: game.homeTeam,
+      away_team: game.awayTeam,
+      game_time: game.gameTime,
+    });
+    if (result?.narrative) {
+      setLocalNarrative(result.narrative);
+    }
+  }, [generate, game]);
+
+  const narrative = localNarrative;
+
   return (
     <div
       onClick={onClose}
@@ -296,22 +314,66 @@ function HsaModal({ game, onClose }: { game: GameView; onClose: () => void }) {
           </button>
         </div>
 
-        {game.hsaNarrative ? (
-          <div
-            style={{
-              color: '#e2e8f0',
-              fontSize: '14px',
-              lineHeight: 1.7,
-              fontWeight: 600,
-              fontFamily: '"Segoe UI", Arial, sans-serif',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {game.hsaNarrative}
+        {narrative ? (
+          <div>
+            <div
+              style={{
+                color: '#e2e8f0',
+                fontSize: '14px',
+                lineHeight: 1.7,
+                fontWeight: 600,
+                fontFamily: '"Segoe UI", Arial, sans-serif',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {narrative}
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              style={{
+                marginTop: '12px',
+                background: 'transparent',
+                border: '1px solid #334155',
+                color: '#94a3b8',
+                borderRadius: '8px',
+                padding: '6px 14px',
+                cursor: loading ? 'wait' : 'pointer',
+                fontSize: '12px',
+                fontWeight: 700,
+              }}
+            >
+              {loading ? 'Refreshing...' : 'Refresh Analysis'}
+            </button>
           </div>
         ) : (
-          <div style={{ color: '#64748b', fontSize: '14px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
-            No analysis available for this game yet.
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div style={{ color: '#64748b', fontSize: '14px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif', marginBottom: '16px' }}>
+              No analysis available for this game yet.
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              style={{
+                background: loading ? '#1e40af' : '#2563eb',
+                border: 'none',
+                color: '#fff',
+                borderRadius: '10px',
+                padding: '12px 24px',
+                cursor: loading ? 'wait' : 'pointer',
+                fontWeight: 800,
+                fontSize: '14px',
+                fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+                transition: 'background 0.15s',
+              }}
+            >
+              {loading ? 'Generating HSA...' : 'Generate HSA'}
+            </button>
+            {error && (
+              <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px', fontWeight: 600 }}>
+                {error}
+              </div>
+            )}
           </div>
         )}
 
@@ -855,7 +917,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} />}
+      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={refresh} />}
     </div>
   );
 }
