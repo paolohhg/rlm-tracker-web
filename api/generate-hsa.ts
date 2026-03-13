@@ -211,13 +211,23 @@ function buildHsaPrompt(league: string, awayTeam: string, homeTeam: string, game
     .map((b) => `${b.book}: spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice}) | ML ${b.mlHome}/${b.mlAway}`)
     .join('\n');
 
-  return `You are a sharp sports betting analyst generating a "Heard Sports Analysis" (HSA) narrative. You analyze odds movement data across multiple sportsbooks to identify sharp action, market inefficiencies, and line movement patterns.
+  // Determine signal type for header
+  const absMove = Math.abs(summary.spreadMovement);
+  const signalType = summary.sharpIndicators.steamMove ? 'Steam Move Alert'
+    : summary.sharpIndicators.frozenLine ? 'Frozen Line Analysis'
+    : absMove >= 1.5 ? 'Contra Signal Analysis'
+    : absMove >= 0.5 ? 'Line Movement Analysis'
+    : 'Market Stability Analysis';
+
+  const headerLine = `${homeTeam} ${summary.opening.consensusSpread} → ${summary.current.consensusSpread} ${signalType}`;
+
+  return `You are a sharp sports betting analyst generating a "Heard Sports Analysis" (HSA) report. You specialize in identifying sharp action, reverse line movement, contra-public signals, and market inefficiencies across multiple sportsbooks.
 
 GAME: ${awayTeam} @ ${homeTeam}
 LEAGUE: ${league}
 GAME TIME: ${gameTime}
 
-=== MARKET SUMMARY ===
+=== MARKET DATA ===
 Tracking: ${summary.snapshotCount} snapshots over ${summary.trackingHours} hours
 Books: ${summary.books.join(', ')}
 
@@ -244,27 +254,43 @@ Key numbers nearby: ${summary.sharpIndicators.keyNumbersNear.length ? summary.sh
 === LINE MOVEMENT TIMELINE ===
 ${timelineStr}
 
-=== ANALYSIS INSTRUCTIONS ===
-Write a 150-250 word narrative analysis covering these areas IN ORDER OF IMPORTANCE:
+=== OUTPUT FORMAT ===
+Start your response with EXACTLY this header line (no asterisks, no markdown):
+${headerLine}
 
-1. LINE MOVEMENT STORY: What happened to the spread from open to now? Did it move sharply or gradually? Did it cross any key numbers (3, 7, 10 in basketball)?
+Then write the analysis using EXACTLY these numbered sections. Each section header must be on its own line formatted as: "N. Section Name:" followed by the analysis paragraph.
 
-2. SHARP vs PUBLIC: Is the line moving in a direction that suggests sharp money? Consider: if one book moved first and others followed, that's sharp action. If books disagree, the outlier may be reacting to sharps.
+REQUIRED SECTIONS:
 
-3. BOOK DISAGREEMENT: Are the books aligned or is one shading differently? Which book is the outlier and in which direction? This often signals one book reacting to sharp action.
+1. Line Movement: Describe exactly what happened to the spread from open to current. Use specific numbers for each book. Identify whether the movement was sharp (fast, coordinated across books) or grinding (slow, public-driven). Flag if any key numbers were crossed (3, 7, 10 in basketball). If the line moved AGAINST where public money would logically go, explicitly call it a contra-public move.
 
-4. TOTALS CONTEXT: Has the total moved? In which direction? Does it tell a different story than the spread? Totals movement can confirm or contradict spread-side action.
+2. Book Protection: Explain WHY the books moved the line the direction they did. Are they responding to sharp money or managing public liability? If the line moved down while the favorite is getting public action, that's books respecting sharp money on the underdog. If books are aligned, explain what that consensus means. If one book is an outlier, identify which one and what it signals.
 
-5. VELOCITY & TIMING: How fast did the line move? Rapid movement suggests steam/sharp action. Slow grinding movement suggests public action.
+3. Market Context: Analyze the totals movement alongside the spread. Do they tell the same story or different stories? A total moving over while the spread tightens can signal different sharp action on each market. Also assess book disagreement - are all books aligned or is there an outlier shading differently?
+
+4. Money Pattern: Describe the velocity and pattern of the movement. Was it a single steam move (sharp) or slow grinding (public)? Did the line move early and hold (sharp respect) or is it still moving (ongoing action)? Characterize whether this is accumulation, a single sharp hit, or public momentum.
+
+5. Sharp Read: Give a DIRECT, OPINIONATED assessment. State clearly what the market signals indicate. Use language like "FOLLOW THE SIGNAL" or "FADE THE PUBLIC" or "NO EDGE - PASS" or "SHARP CONSENSUS" depending on what the data shows. Name the specific side and number the market is pointing to (e.g., "Rutgers +10.5"). Be honest - if there's no clear signal, say "PASS - no actionable edge detected."
+
+6. Confirmation Factors: List 3-5 specific things to monitor that would CONFIRM or KILL the signal:
+- What further line movement would strengthen the signal
+- What reverse movement would kill it
+- What key number thresholds matter
+- Any situational factors (conference tournament context, rivalry, travel, etc.)
+- What would indicate the sharp money was wrong
+
+End with a one-sentence closing summary of the overall market read.
+
+Add "Disclaimer: For research purposes only." at the very end.
 
 FORMAT RULES:
-- Write in direct, confident analyst voice
-- Lead with the most significant finding
-- Use specific numbers (e.g., "opened -3.5, now -4.5 across all three books")
-- End with a one-sentence "BOTTOM LINE:" assessment
-- Do NOT give betting advice or picks - describe what the market is telling us
-- Do NOT use bullet points - write in flowing paragraphs
-- Do NOT use markdown formatting`;
+- Write in direct, confident, analyst voice - like a sharp bettor briefing his crew
+- Use specific numbers everywhere (spreads, totals, juice, specific book names)
+- Do NOT use asterisks, bold markdown, or any markdown formatting
+- Do NOT use bullet points with dashes in sections 1-5, write in flowing paragraphs
+- Section 6 (Confirmation Factors) SHOULD use dashes for the list items
+- Each numbered section should be 2-4 sentences
+- Total length: 300-500 words`;
 }
 
 // ── Vercel Handler ─────────────────────────────────────────────────
@@ -338,7 +364,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [{ role: 'user', content: prompt }],
     });
 
