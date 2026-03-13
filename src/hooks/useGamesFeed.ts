@@ -262,6 +262,9 @@ export function useGamesFeed() {
 
   const fetchGames = useCallback(async () => {
     try {
+      // Fire-and-forget: refresh splits from Action Network on each load
+      fetch('/api/fetch-splits').catch(() => {});
+
       const [
         tipoffRes,
         alertsRes,
