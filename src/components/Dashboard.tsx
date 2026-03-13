@@ -622,38 +622,67 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
       )}
 
       {/* Betting splits */}
-      {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (
-        <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div style={cardLabelStyle()}>Betting Splits</div>
-          {game.publicBetsPct !== null && (
+      {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (() => {
+        const awayShort = game.awayTeam.split(' ').slice(0, -1).join(' ') || game.awayTeam;
+        const homeShort = game.homeTeam.split(' ').slice(0, -1).join(' ') || game.homeTeam;
+        const awayBets = game.awayBetsPct ?? (game.publicBetsPct != null ? 100 - game.publicBetsPct : null);
+        const homeBets = game.publicBetsPct;
+        const awayMoney = game.awayMoneyPct ?? (game.publicMoneyPct != null ? 100 - game.publicMoneyPct : null);
+        const homeMoney = game.publicMoneyPct;
+        return (
+        <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={cardLabelStyle()}>Betting Splits</div>
+            {game.numBets != null && (
+              <div style={{ fontSize: '10px', color: '#475569', fontWeight: 700 }}>{game.numBets.toLocaleString()} bets</div>
+            )}
+          </div>
+          {homeBets !== null && awayBets !== null && (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '3px' }}>
-                <span>Public Bets</span>
-                <span>{game.publicBetsPct}% public</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 800, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span>Tickets</span>
               </div>
-              <div style={{ background: '#1e293b', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${game.publicBetsPct}%`, height: '100%', background: '#3b82f6', borderRadius: '4px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px', textAlign: 'right' }}>{awayBets}%</div>
+                <div style={{ flex: 1, display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden', background: '#1e293b' }}>
+                  <div style={{ width: `${awayBets}%`, background: '#3b82f6', transition: 'width 0.3s' }} />
+                  <div style={{ width: `${homeBets}%`, background: '#8b5cf6', transition: 'width 0.3s' }} />
+                </div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px' }}>{homeBets}%</div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 700, marginTop: '2px' }}>
+                <span>{awayShort}</span>
+                <span>{homeShort}</span>
               </div>
             </div>
           )}
-          {game.publicMoneyPct !== null && (
+          {homeMoney !== null && awayMoney !== null && (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '3px' }}>
-                <span>Public Money</span>
-                <span>{game.publicMoneyPct}% public</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 800, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span>Money</span>
               </div>
-              <div style={{ background: '#1e293b', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${game.publicMoneyPct}%`, height: '100%', background: '#8b5cf6', borderRadius: '4px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px', textAlign: 'right' }}>{awayMoney}%</div>
+                <div style={{ flex: 1, display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden', background: '#1e293b' }}>
+                  <div style={{ width: `${awayMoney}%`, background: '#3b82f6', transition: 'width 0.3s' }} />
+                  <div style={{ width: `${homeMoney}%`, background: '#8b5cf6', transition: 'width 0.3s' }} />
+                </div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px' }}>{homeMoney}%</div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 700, marginTop: '2px' }}>
+                <span>{awayShort}</span>
+                <span>{homeShort}</span>
               </div>
             </div>
           )}
           {game.booksAgreeing !== null && game.totalBooks !== null && (
             <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>
-              {game.booksAgreeing}/{game.totalBooks} books agreeing • {game.velocityPerHour !== null ? `${game.velocityPerHour}/hr velocity` : ''}
+              {game.booksAgreeing}/{game.totalBooks} books agreeing{game.velocityPerHour !== null ? ` • ${game.velocityPerHour}/hr velocity` : ''}
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       <div
         onClick={() => onOpenHsa(game)}

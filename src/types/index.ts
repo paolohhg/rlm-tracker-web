@@ -27,7 +27,10 @@ export interface GameView {
   velocityPerHour: number | null
   publicBetsPct: number | null
   publicMoneyPct: number | null
+  awayBetsPct: number | null
+  awayMoneyPct: number | null
   sharpMoneyPct: number | null
+  numBets: number | null
   scenarioKey: string | null
   hsaStatus: HsaStatus
   hsaSnippet: string | null

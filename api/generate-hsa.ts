@@ -210,7 +210,7 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
 
 // ── HSA Prompt Builder ─────────────────────────────────────────────
 
-function buildHsaPrompt(league: string, awayTeam: string, homeTeam: string, gameTime: string, summary: OddsSummary): string {
+function buildHsaPrompt(league: string, awayTeam: string, homeTeam: string, gameTime: string, summary: OddsSummary, splits?: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null): string {
   const timelineStr = summary.timeline
     .map((t) => `${t.label}: spread ${t.consensusSpread} | total ${t.consensusTotal} [${t.books.map((b) => `${b.book}: ${b.spread}/${b.total}`).join(', ')}]`)
     .join('\n');
@@ -272,6 +272,15 @@ Steam move: ${summary.sharpIndicators.steamMove ? `YES - ${summary.sharpIndicato
 Frozen line: ${summary.sharpIndicators.frozenLine ? 'YES - line barely moved despite extended tracking' : 'No'}
 Crossed key number: ${summary.sharpIndicators.crossedKeyNumber ? 'YES' : 'No'}
 Key numbers nearby: ${summary.sharpIndicators.keyNumbersNear.length ? summary.sharpIndicators.keyNumbersNear.join(', ') : 'none'}
+${splits ? `
+=== BETTING SPLITS (from Action Network) ===
+Total bets tracked: ${splits.numBets.toLocaleString()}
+Spread tickets: ${awayTeam} ${splits.awayBetsPct}% / ${homeTeam} ${splits.homeBetsPct}%
+Spread money: ${awayTeam} ${splits.awayMoneyPct}% / ${homeTeam} ${splits.homeMoneyPct}%
+${splits.awayBetsPct !== splits.awayMoneyPct ? `TICKET/MONEY DIVERGENCE: ${Math.abs(splits.awayBetsPct - splits.awayMoneyPct)}% gap on ${awayTeam} side (${splits.awayBetsPct}% tickets vs ${splits.awayMoneyPct}% money)` : 'Tickets and money aligned'}
+${(splits.awayBetsPct > 50 && splits.awayMoneyPct < splits.awayBetsPct) || (splits.homeBetsPct > 50 && splits.homeMoneyPct < splits.homeBetsPct) ? 'NOTE: Public side getting more tickets than money - possible sharp money on opposite side' : ''}` : `
+=== BETTING SPLITS ===
+No betting splits data available for this game.`}
 
 === LINE MOVEMENT TIMELINE ===
 ${timelineStr}
@@ -288,9 +297,9 @@ REQUIRED SECTIONS:
 
 2. Book Protection: Explain WHY the books moved the line the direction they did. Are they responding to sharp money or managing public liability? If the line moved down while the favorite is getting public action, that's books respecting sharp money on the underdog. If books are aligned, explain what that consensus means. If one book is an outlier, identify which one and what it signals.
 
-3. Market Context: Analyze the totals movement alongside the spread. Do they tell the same story or different stories? A total moving over while the spread tightens can signal different sharp action on each market. Also assess book disagreement - are all books aligned or is there an outlier shading differently?
+3. Public Narrative: Using the betting splits data, describe what the public is doing vs where the money is going. State the ticket percentages and money percentages for each side. Identify any ticket/money divergence - when one side has more tickets but the other side has more money, that signals sharp action. If 65%+ of tickets are on one side but money is closer to even or reversed, that's a strong contra-public indicator. If no splits data is available, analyze the totals movement alongside the spread for market context clues.
 
-4. Money Pattern: Describe the velocity and pattern of the movement. Was it a single steam move (sharp) or slow grinding (public)? Did the line move early and hold (sharp respect) or is it still moving (ongoing action)? Characterize whether this is accumulation, a single sharp hit, or public momentum.
+4. Money Pattern: Describe the velocity and pattern of the movement. Was it a single steam move (sharp) or slow grinding (public)? Did the line move early and hold (sharp respect) or is it still moving (ongoing action)? Connect the money pattern to the betting splits - does the money flow match or contradict the public ticket distribution?
 
 5. Sharp Read: Give a DIRECT, OPINIONATED assessment. State clearly what the market signals indicate. Use language like "FOLLOW THE SIGNAL" or "FADE THE PUBLIC" or "NO EDGE - PASS" or "SHARP CONSENSUS" depending on what the data shows. Name the specific side and number the market is pointing to (e.g., "Rutgers +10.5"). Be honest - if there's no clear signal, say "PASS - no actionable edge detected."
 
@@ -381,8 +390,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Preprocess odds into structured summary
     const summary = summarizeOdds(odds, game_time);
 
+    // Fetch betting splits from splits_snapshots table
+    let splitsData: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null = null;
+    const { data: splitsRows } = await supabase
+      .from('splits_snapshots')
+      .select('*')
+      .eq('league', league)
+      .eq('home_team', home_team)
+      .eq('away_team', away_team)
+      .order('fetched_at', { ascending: false })
+      .limit(1);
+
+    if (splitsRows?.length) {
+      const s = splitsRows[0];
+      splitsData = {
+        homeBetsPct: s.home_ticket_pct,
+        awayBetsPct: s.away_ticket_pct,
+        homeMoneyPct: s.home_money_pct,
+        awayMoneyPct: s.away_money_pct,
+        numBets: s.num_bets ?? 0,
+      };
+    }
+
     // Build prompt and call Claude
-    const prompt = buildHsaPrompt(league, away_team, home_team, game_time, summary);
+    const prompt = buildHsaPrompt(league, away_team, home_team, game_time, summary, splitsData);
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
