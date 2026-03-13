@@ -1,5 +1,6 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useGamesFeed } from '../hooks/useGamesFeed';
+import { useGenerateHsa } from '../hooks/useGenerateHsa';
 import type { GameView } from '../types';
 
 type StatusFilter = 'all' | 'upcoming' | 'live' | 'final';
@@ -233,7 +234,24 @@ function TeamBadge({ league, teamName, ncaabLogos }: { league: string; teamName:
   );
 }
 
-function HsaModal({ game, onClose }: { game: GameView; onClose: () => void }) {
+function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () => void; onRefresh: () => void }) {
+  const [localNarrative, setLocalNarrative] = useState<string | null>(game.hsaNarrative);
+  const { generate, loading, error } = useGenerateHsa(onRefresh);
+
+  const handleGenerate = useCallback(async () => {
+    const result = await generate({
+      league: game.league,
+      home_team: game.homeTeam,
+      away_team: game.awayTeam,
+      game_time: game.gameTime,
+    });
+    if (result?.narrative) {
+      setLocalNarrative(result.narrative);
+    }
+  }, [generate, game]);
+
+  const narrative = localNarrative;
+
   return (
     <div
       onClick={onClose}
@@ -296,22 +314,66 @@ function HsaModal({ game, onClose }: { game: GameView; onClose: () => void }) {
           </button>
         </div>
 
-        {game.hsaNarrative ? (
-          <div
-            style={{
-              color: '#e2e8f0',
-              fontSize: '14px',
-              lineHeight: 1.7,
-              fontWeight: 600,
-              fontFamily: '"Segoe UI", Arial, sans-serif',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {game.hsaNarrative}
+        {narrative ? (
+          <div>
+            <div
+              style={{
+                color: '#e2e8f0',
+                fontSize: '14px',
+                lineHeight: 1.7,
+                fontWeight: 600,
+                fontFamily: '"Segoe UI", Arial, sans-serif',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {narrative}
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              style={{
+                marginTop: '12px',
+                background: 'transparent',
+                border: '1px solid #334155',
+                color: '#94a3b8',
+                borderRadius: '8px',
+                padding: '6px 14px',
+                cursor: loading ? 'wait' : 'pointer',
+                fontSize: '12px',
+                fontWeight: 700,
+              }}
+            >
+              {loading ? 'Refreshing...' : 'Refresh Analysis'}
+            </button>
           </div>
         ) : (
-          <div style={{ color: '#64748b', fontSize: '14px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
-            No analysis available for this game yet.
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div style={{ color: '#64748b', fontSize: '14px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif', marginBottom: '16px' }}>
+              No analysis available for this game yet.
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              style={{
+                background: loading ? '#1e40af' : '#2563eb',
+                border: 'none',
+                color: '#fff',
+                borderRadius: '10px',
+                padding: '12px 24px',
+                cursor: loading ? 'wait' : 'pointer',
+                fontWeight: 800,
+                fontSize: '14px',
+                fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+                transition: 'background 0.15s',
+              }}
+            >
+              {loading ? 'Generating HSA...' : 'Generate HSA'}
+            </button>
+            {error && (
+              <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px', fontWeight: 600 }}>
+                {error}
+              </div>
+            )}
           </div>
         )}
 
@@ -533,39 +595,94 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
         </div>
       </div>
 
+      {/* Totals */}
+      {(game.openingTotal !== null || game.currentTotal !== null) && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+          <div style={cardLabelStyle()}>Total</div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              {game.openingTotal ?? '—'}
+            </span>
+            <span style={{ color: '#475569', fontSize: '11px' }}>→</span>
+            <span style={{ color: '#f8fafc', fontSize: '12px', fontWeight: 900, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              {game.currentTotal ?? '—'}
+            </span>
+            {game.openingTotal !== null && game.currentTotal !== null && game.currentTotal !== game.openingTotal && (
+              <span style={{
+                color: game.currentTotal > game.openingTotal ? '#22c55e' : '#ef4444',
+                fontSize: '11px',
+                fontWeight: 800,
+                fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+              }}>
+                {game.currentTotal > game.openingTotal ? '↑' : '↓'} {Math.abs(game.currentTotal - game.openingTotal).toFixed(1)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Betting splits */}
-      {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (
-        <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div style={cardLabelStyle()}>Betting Splits</div>
-          {game.publicBetsPct !== null && (
+      {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (() => {
+        const awayShort = game.awayTeam.split(' ').slice(0, -1).join(' ') || game.awayTeam;
+        const homeShort = game.homeTeam.split(' ').slice(0, -1).join(' ') || game.homeTeam;
+        const awayBets = game.awayBetsPct ?? (game.publicBetsPct != null ? 100 - game.publicBetsPct : null);
+        const homeBets = game.publicBetsPct;
+        const awayMoney = game.awayMoneyPct ?? (game.publicMoneyPct != null ? 100 - game.publicMoneyPct : null);
+        const homeMoney = game.publicMoneyPct;
+        return (
+        <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={cardLabelStyle()}>Betting Splits</div>
+            {game.numBets != null && (
+              <div style={{ fontSize: '10px', color: '#475569', fontWeight: 700 }}>{game.numBets.toLocaleString()} bets</div>
+            )}
+          </div>
+          {homeBets !== null && awayBets !== null && (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '3px' }}>
-                <span>Public Bets</span>
-                <span>{game.publicBetsPct}% public</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 800, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span>Tickets</span>
               </div>
-              <div style={{ background: '#1e293b', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${game.publicBetsPct}%`, height: '100%', background: '#3b82f6', borderRadius: '4px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px', textAlign: 'right' }}>{awayBets}%</div>
+                <div style={{ flex: 1, display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden', background: '#1e293b' }}>
+                  <div style={{ width: `${awayBets}%`, background: '#3b82f6', transition: 'width 0.3s' }} />
+                  <div style={{ width: `${homeBets}%`, background: '#8b5cf6', transition: 'width 0.3s' }} />
+                </div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px' }}>{homeBets}%</div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 700, marginTop: '2px' }}>
+                <span>{awayShort}</span>
+                <span>{homeShort}</span>
               </div>
             </div>
           )}
-          {game.publicMoneyPct !== null && (
+          {homeMoney !== null && awayMoney !== null && (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', fontWeight: 700, marginBottom: '3px' }}>
-                <span>Public Money</span>
-                <span>{game.publicMoneyPct}% public</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 800, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span>Money</span>
               </div>
-              <div style={{ background: '#1e293b', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                <div style={{ width: `${game.publicMoneyPct}%`, height: '100%', background: '#8b5cf6', borderRadius: '4px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px', textAlign: 'right' }}>{awayMoney}%</div>
+                <div style={{ flex: 1, display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden', background: '#1e293b' }}>
+                  <div style={{ width: `${awayMoney}%`, background: '#3b82f6', transition: 'width 0.3s' }} />
+                  <div style={{ width: `${homeMoney}%`, background: '#8b5cf6', transition: 'width 0.3s' }} />
+                </div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 800, minWidth: '32px' }}>{homeMoney}%</div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 700, marginTop: '2px' }}>
+                <span>{awayShort}</span>
+                <span>{homeShort}</span>
               </div>
             </div>
           )}
           {game.booksAgreeing !== null && game.totalBooks !== null && (
             <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>
-              {game.booksAgreeing}/{game.totalBooks} books agreeing • {game.velocityPerHour !== null ? `${game.velocityPerHour}/hr velocity` : ''}
+              {game.booksAgreeing}/{game.totalBooks} books agreeing{game.velocityPerHour !== null ? ` • ${game.velocityPerHour}/hr velocity` : ''}
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       <div
         onClick={() => onOpenHsa(game)}
@@ -592,6 +709,58 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
           {game.hsaSnippet ?? 'No score or narrative yet'}
         </div>
       </div>
+
+      {/* Bet suggestion from HSA */}
+      {game.hsaNarrative && (() => {
+        const sharpMatch = game.hsaNarrative.match(/5\.\s*Sharp Read:\s*(.*?)(?=\n\n|\n6\.)/s);
+        if (!sharpMatch) return null;
+        const sharpText = sharpMatch[1].trim();
+        const isPass = /NO EDGE|PASS/i.test(sharpText);
+        const betMatch = sharpText.match(/(?:on\s+|[-–—]\s*)([\w\s.'']+?)\s+([+-]\d+\.?\d*)/);
+        const actionMatch = sharpText.match(/(FOLLOW THE SIGNAL|FADE THE PUBLIC|SHARP CONSENSUS)/i);
+        if (isPass) {
+          return (
+            <div style={{
+              background: 'rgba(100,116,139,0.15)',
+              border: '1px solid rgba(100,116,139,0.3)',
+              borderRadius: '8px',
+              padding: '8px 10px',
+              marginTop: '6px',
+            }}>
+              <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 800, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+                NO EDGE — PASS
+              </div>
+              <div style={{ color: '#64748b', fontSize: '10px', fontWeight: 600, marginTop: '2px' }}>
+                No actionable signal detected
+              </div>
+            </div>
+          );
+        }
+        if (!betMatch) return null;
+        const betTeam = betMatch[1].trim();
+        const betSpread = betMatch[2];
+        const action = actionMatch?.[1]?.toUpperCase() || 'SIGNAL';
+        // Find opposing team
+        const oppTeam = betTeam.toLowerCase().includes(game.homeTeam.split(' ').pop()!.toLowerCase())
+          ? game.awayTeam : game.homeTeam;
+        const oppSpread = betSpread.startsWith('+') ? betSpread.replace('+', '-') : betSpread.replace('-', '+');
+        return (
+          <div style={{
+            background: 'rgba(139,92,246,0.12)',
+            border: '1px solid rgba(139,92,246,0.3)',
+            borderRadius: '8px',
+            padding: '8px 10px',
+            marginTop: '6px',
+          }}>
+            <div style={{ color: '#a78bfa', fontSize: '11px', fontWeight: 900, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              BET: {betTeam} {betSpread} (fading {oppTeam} {oppSpread})
+            </div>
+            <div style={{ color: '#7c3aed', fontSize: '10px', fontWeight: 700, marginTop: '2px' }}>
+              {action} • Line moving against consensus
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -604,7 +773,7 @@ export function Dashboard() {
     fetchNcaabLogoMap().then(setNcaabLogos);
   }, []);
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('upcoming');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('live');
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
@@ -855,7 +1024,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} />}
+      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={refresh} />}
     </div>
   );
 }
