@@ -183,7 +183,7 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
 
   const urls = [
     'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
-    'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard',
+    'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50',
   ];
 
   await Promise.all(urls.map(async (url) => {
@@ -255,17 +255,11 @@ export function useGamesFeed() {
       ] = await Promise.all([
         supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date().toLocaleDateString('en-CA')).order('game_time', { ascending: true }),
         supabase.from('rlm_alerts').select('*').order('detected_at', { ascending: false }),
-        supabase.from('odds_snapshots').select('*').order('fetched_at', { ascending: false }),
+        supabase.from('odds_snapshots').select('*').gte('game_time', new Date().toLocaleDateString('en-CA')).order('fetched_at', { ascending: false }),
         supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
         fetchEspnScores(),
       ]);
-
-      console.log('[feed] tipoffs:', tipoffRes.data?.length, 'err:', tipoffRes.error?.message);
-      console.log('[feed] tipoff game_times:', tipoffRes.data?.map(t => t.game_time));
-      console.log('[feed] odds:', oddsRes.data?.length, 'err:', oddsRes.error?.message);
-      console.log('[feed] odds sample:', oddsRes.data?.slice(0, 3).map(o => ({ league: o.league, home: o.home_team, away: o.away_team, spread: o.spread, fetched_at: o.fetched_at })));
-      console.log('[feed] today filter value:', new Date().toLocaleDateString('en-CA'));
 
       const tipoffs = tipoffRes.data ?? [];
       const alerts = alertsRes.data ?? [];
@@ -279,9 +273,6 @@ export function useGamesFeed() {
           scoreByGameId[s.game_id] = s;
         }
       }
-
-      console.debug('[scores] rows fetched:', scores.length, scores[0]);
-      console.debug('[tipoffs] sample game_id:', tipoffs[0]?.game_id);
 
       const alertMap: Record<string, any> = {};
       for (const a of alerts) {
@@ -382,6 +373,7 @@ export function useGamesFeed() {
           scenarioKey: alert?.scenario_key ?? t.scenario_key ?? null,
           hsaStatus: deriveHsaStatus(narrative),
           hsaSnippet,
+          hsaNarrative: narrative && narrative !== 'NO_NARRATIVE' ? narrative : null,
           isLocked: t.is_locked ?? false,
           lastUpdated:
             alert?.detected_at ??
@@ -393,8 +385,6 @@ export function useGamesFeed() {
         };
       });
 
-      console.log('[feed] sample alert keys:', alerts[0] ? Object.keys(alerts[0]) : 'no alerts');
-      console.log('[feed] uniqueTipoffs:', uniqueTipoffs.length, 'gameViews:', gameViews.length);
       setGames(gameViews);
       setLastUpdated(new Date());
     } catch (err) {

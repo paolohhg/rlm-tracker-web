@@ -31,6 +31,7 @@ export interface GameView {
   scenarioKey: string | null
   hsaStatus: HsaStatus
   hsaSnippet: string | null
+  hsaNarrative: string | null
   isLocked: boolean
   lastUpdated: string
 }

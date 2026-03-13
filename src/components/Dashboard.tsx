@@ -233,7 +233,97 @@ function TeamBadge({ league, teamName, ncaabLogos }: { league: string; teamName:
   );
 }
 
-function GameCard({ game, ncaabLogos }: { game: GameView; ncaabLogos: Record<string, string> }) {
+function HsaModal({ game, onClose }: { game: GameView; onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.7)',
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#111827',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: '16px',
+          padding: '24px',
+          maxWidth: '600px',
+          width: '100%',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+          <div>
+            <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              Heard Sports Analysis
+            </div>
+            <div style={{ color: '#f8fafc', fontWeight: 900, fontSize: '17px', marginTop: '6px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              {game.awayTeam} @ {game.homeTeam}
+            </div>
+            <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              {game.league} • {game.signalTier}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: '#1e293b',
+              border: 'none',
+              color: '#94a3b8',
+              borderRadius: '999px',
+              width: '32px',
+              height: '32px',
+              cursor: 'pointer',
+              fontWeight: 900,
+              fontSize: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {game.hsaNarrative ? (
+          <div
+            style={{
+              color: '#e2e8f0',
+              fontSize: '14px',
+              lineHeight: 1.7,
+              fontWeight: 600,
+              fontFamily: '"Segoe UI", Arial, sans-serif',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {game.hsaNarrative}
+          </div>
+        ) : (
+          <div style={{ color: '#64748b', fontSize: '14px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+            No analysis available for this game yet.
+          </div>
+        )}
+
+        <div style={{ color: '#475569', fontSize: '11px', marginTop: '16px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+          For informational and research purposes only.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void }) {
   const signalBg = signalColor(game.signalTier);
 
   return (
@@ -477,8 +567,18 @@ function GameCard({ game, ncaabLogos }: { game: GameView; ncaabLogos: Record<str
         </div>
       )}
 
-      <div>
-        <div style={cardLabelStyle()}>Intel</div>
+      <div
+        onClick={() => onOpenHsa(game)}
+        style={{ cursor: 'pointer' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={cardLabelStyle()}>Intel</div>
+          {game.hsaNarrative && (
+            <div style={{ fontSize: '10px', color: '#7c3aed', fontWeight: 900, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              HSA AVAILABLE →
+            </div>
+          )}
+        </div>
         <div
           style={{
             color: '#cbd5e1',
@@ -507,6 +607,7 @@ export function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('upcoming');
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [hsaGame, setHsaGame] = useState<GameView | null>(null);
 
   const filteredGames = useMemo(() => {
     let result = [...games];
@@ -748,11 +849,13 @@ export function Dashboard() {
             }}
           >
             {filteredGames.map((game) => (
-              <GameCard key={game.id} game={game} ncaabLogos={ncaabLogos} />
+              <GameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} />
             ))}
           </div>
         )}
       </div>
+
+      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} />}
     </div>
   );
 }
