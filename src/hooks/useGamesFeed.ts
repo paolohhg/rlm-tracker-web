@@ -58,8 +58,20 @@ function normalizeTeamName(name: string | null | undefined): string {
 
   const raw = name
     .toLowerCase()
-    .replace(/[.'’()-]/g, '')
-    .replace(/&/g, 'and')
+    // Normalize accented characters
+    .replace(/[éèêë]/g, 'e')
+    .replace(/[áàâä]/g, 'a')
+    .replace(/[íìîï]/g, 'i')
+    .replace(/[óòôö]/g, 'o')
+    .replace(/[úùûü]/g, 'u')
+    .replace(/[.''()]/g, '')   // remove punctuation (not hyphen)
+    .replace(/-/g, ' ')        // hyphen → space (keeps "UT-Arlington" as "ut arlington")
+    .replace(/\s*&\s*/g, ' and ')  // & → " and " with spaces
+    // Expand common abbreviations used by The Odds API but not ESPN
+    .replace(/ st /g, ' state ')   // "Mississippi St Bulldogs" → "Mississippi State Bulldogs"
+    .replace(/ st$/, ' state')     // trailing "St" (edge case)
+    .replace(/ univ /g, ' university ')  // "Boston Univ." → "Boston University"
+    .replace(/ univ$/, ' university')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -111,6 +123,10 @@ function normalizeTeamName(name: string | null | undefined): string {
     'furman paladins': 'furman',
     'troy trojans': 'troy',
     'georgia southern eagles': 'georgia southern',
+    // Odds API abbreviations not matching ESPN
+    'loyola chi ramblers': 'loyola chicago ramblers',
+    'csu northridge matadors': 'cal state northridge matadors',
+    'ut arlington mavericks': 'ut arlington mavericks',
   };
 
   return aliases[raw] ?? raw;
@@ -178,6 +194,9 @@ function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
 
 type EspnScoreEntry = { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null };
 
+// Persist scores across polls — once ESPN drops a finished game, we keep the last known score
+const espnScoreCache: Record<string, EspnScoreEntry> = {};
+
 async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
   const map: Record<string, EspnScoreEntry> = {};
 
@@ -235,7 +254,9 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
     } catch { /* silently skip if ESPN is unreachable */ }
   }));
 
-  return map;
+  // Merge fresh data into persistent cache (never evict — keeps final scores after game drops off scoreboard)
+  Object.assign(espnScoreCache, map);
+  return espnScoreCache;
 }
 
 export function useGamesFeed() {
@@ -251,6 +272,7 @@ export function useGamesFeed() {
         oddsRes,
         analysesRes,
         scoresRes,
+        splitsRes,
         espnScores,
       ] = await Promise.all([
         supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date().toLocaleDateString('en-CA')).order('game_time', { ascending: true }),
@@ -258,6 +280,7 @@ export function useGamesFeed() {
         supabase.from('odds_snapshots').select('*').gte('game_time', new Date().toLocaleDateString('en-CA')).order('fetched_at', { ascending: false }),
         supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
+        supabase.from('splits_snapshots').select('*').order('fetched_at', { ascending: false }),
         fetchEspnScores(),
       ]);
 
@@ -266,6 +289,14 @@ export function useGamesFeed() {
       const odds = oddsRes.data ?? [];
       const analyses = analysesRes.data ?? [];
       const scores = scoresRes.data ?? [];
+      const splits = splitsRes.data ?? [];
+
+      // Build splits map — most recent entry per game wins
+      const splitsMap: Record<string, any> = {};
+      for (const s of [...splits].reverse()) {
+        const key = buildMatchKey(s.league, s.home_team, s.away_team);
+        splitsMap[key] = s;
+      }
 
       const scoreByGameId: Record<string, any> = {};
       for (const s of scores) {
@@ -305,11 +336,27 @@ export function useGamesFeed() {
         const score = scoreByGameId[t.game_id] ?? null;
         const alert = alertMap[fallbackKey] ?? null;
         const analysis = analysisMap[fallbackKey] ?? null;
+        const split = splitsMap[fallbackKey] ?? null;
         const bestOdds = findBestOddsMatch(t, odds);
 
-        // ESPN live score — keyed by home|away normalized names
-        const espnKey = normalizeTeamName(t.home_team) + '|' + normalizeTeamName(t.away_team);
-        const espn = espnScores[espnKey] ?? null;
+        // ESPN live score — try exact key first, then fuzzy partial match
+        const normHome = normalizeTeamName(t.home_team);
+        const normAway = normalizeTeamName(t.away_team);
+        const espnKey = `${normHome}|${normAway}`;
+        let espn = espnScores[espnKey] ?? null;
+
+        if (!espn) {
+          const fuzzyKey = Object.keys(espnScores).find((k) => {
+            const [h, a] = k.split('|');
+            const homeMatch = h.includes(normHome) || normHome.includes(h);
+            const awayMatch = a.includes(normAway) || normAway.includes(a);
+            // Also try reversed — neutral-site tournament games often have different home/away
+            const revHomeMatch = h.includes(normAway) || normAway.includes(h);
+            const revAwayMatch = a.includes(normHome) || normHome.includes(a);
+            return (homeMatch && awayMatch) || (revHomeMatch && revAwayMatch);
+          });
+          if (fuzzyKey) espn = espnScores[fuzzyKey];
+        }
 
         const minutesFromNow = deriveTimeToTip(t.game_time);
 
@@ -367,8 +414,8 @@ export function useGamesFeed() {
           booksAgreeing: alert?.books_agreeing ?? null,
           totalBooks: alert?.total_books ?? null,
           velocityPerHour: alert?.velocity_per_hour ?? null,
-          publicBetsPct: alert?.public_bets_pct ?? alert?.bets_pct ?? null,
-          publicMoneyPct: alert?.public_money_pct ?? alert?.money_pct ?? null,
+          publicBetsPct: alert?.public_bets_pct ?? alert?.bets_pct ?? split?.home_ticket_pct ?? null,
+          publicMoneyPct: alert?.public_money_pct ?? alert?.money_pct ?? split?.home_money_pct ?? null,
           sharpMoneyPct: alert?.sharp_money_pct ?? null,
           scenarioKey: alert?.scenario_key ?? t.scenario_key ?? null,
           hsaStatus: deriveHsaStatus(narrative),

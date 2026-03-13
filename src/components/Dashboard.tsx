@@ -604,7 +604,7 @@ export function Dashboard() {
     fetchNcaabLogoMap().then(setNcaabLogos);
   }, []);
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('upcoming');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('live');
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
