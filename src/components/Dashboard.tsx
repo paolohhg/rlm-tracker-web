@@ -595,6 +595,32 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
         </div>
       </div>
 
+      {/* Totals */}
+      {(game.openingTotal !== null || game.currentTotal !== null) && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+          <div style={cardLabelStyle()}>Total</div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              {game.openingTotal ?? '—'}
+            </span>
+            <span style={{ color: '#475569', fontSize: '11px' }}>→</span>
+            <span style={{ color: '#f8fafc', fontSize: '12px', fontWeight: 900, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              {game.currentTotal ?? '—'}
+            </span>
+            {game.openingTotal !== null && game.currentTotal !== null && game.currentTotal !== game.openingTotal && (
+              <span style={{
+                color: game.currentTotal > game.openingTotal ? '#22c55e' : '#ef4444',
+                fontSize: '11px',
+                fontWeight: 800,
+                fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+              }}>
+                {game.currentTotal > game.openingTotal ? '↑' : '↓'} {Math.abs(game.currentTotal - game.openingTotal).toFixed(1)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Betting splits */}
       {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (
         <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -654,6 +680,58 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
           {game.hsaSnippet ?? 'No score or narrative yet'}
         </div>
       </div>
+
+      {/* Bet suggestion from HSA */}
+      {game.hsaNarrative && (() => {
+        const sharpMatch = game.hsaNarrative.match(/5\.\s*Sharp Read:\s*(.*?)(?=\n\n|\n6\.)/s);
+        if (!sharpMatch) return null;
+        const sharpText = sharpMatch[1].trim();
+        const isPass = /NO EDGE|PASS/i.test(sharpText);
+        const betMatch = sharpText.match(/(?:on\s+|[-–—]\s*)([\w\s.'']+?)\s+([+-]\d+\.?\d*)/);
+        const actionMatch = sharpText.match(/(FOLLOW THE SIGNAL|FADE THE PUBLIC|SHARP CONSENSUS)/i);
+        if (isPass) {
+          return (
+            <div style={{
+              background: 'rgba(100,116,139,0.15)',
+              border: '1px solid rgba(100,116,139,0.3)',
+              borderRadius: '8px',
+              padding: '8px 10px',
+              marginTop: '6px',
+            }}>
+              <div style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 800, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+                NO EDGE — PASS
+              </div>
+              <div style={{ color: '#64748b', fontSize: '10px', fontWeight: 600, marginTop: '2px' }}>
+                No actionable signal detected
+              </div>
+            </div>
+          );
+        }
+        if (!betMatch) return null;
+        const betTeam = betMatch[1].trim();
+        const betSpread = betMatch[2];
+        const action = actionMatch?.[1]?.toUpperCase() || 'SIGNAL';
+        // Find opposing team
+        const oppTeam = betTeam.toLowerCase().includes(game.homeTeam.split(' ').pop()!.toLowerCase())
+          ? game.awayTeam : game.homeTeam;
+        const oppSpread = betSpread.startsWith('+') ? betSpread.replace('+', '-') : betSpread.replace('-', '+');
+        return (
+          <div style={{
+            background: 'rgba(139,92,246,0.12)',
+            border: '1px solid rgba(139,92,246,0.3)',
+            borderRadius: '8px',
+            padding: '8px 10px',
+            marginTop: '6px',
+          }}>
+            <div style={{ color: '#a78bfa', fontSize: '11px', fontWeight: 900, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+              BET: {betTeam} {betSpread} (fading {oppTeam} {oppSpread})
+            </div>
+            <div style={{ color: '#7c3aed', fontSize: '10px', fontWeight: 700, marginTop: '2px' }}>
+              {action} • Line moving against consensus
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -32,6 +32,11 @@ export interface GameView {
   hsaStatus: HsaStatus
   hsaSnippet: string | null
   hsaNarrative: string | null
+  hsaBetTeam: string | null
+  hsaBetSpread: string | null
+  hsaSignalAction: string | null
+  openingTotal: number | null
+  currentTotal: number | null
   isLocked: boolean
   lastUpdated: string
 }

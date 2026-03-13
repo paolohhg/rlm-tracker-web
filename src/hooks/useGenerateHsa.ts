@@ -12,6 +12,12 @@ interface HsaResult {
   cached: boolean;
   snapshot_count?: number;
   tracking_hours?: number;
+  signal_action?: string;
+  bet_team?: string;
+  bet_spread?: string;
+  totals_open?: number;
+  totals_current?: number;
+  totals_move?: number;
 }
 
 export function useGenerateHsa(onSuccess?: () => void) {

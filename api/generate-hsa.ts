@@ -65,6 +65,10 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+function roundHalf(n: number): number {
+  return Math.round(n * 2) / 2;
+}
+
 function toBookLine(snap: OddsSnapshot): BookLine {
   return {
     book: snap.bookmaker,
@@ -113,8 +117,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
   const openingBooks = Object.values(openingByBook).map(toBookLine);
   const openingSpreads = openingBooks.filter((b) => b.spread !== 0);
   const openingTotals = openingBooks.filter((b) => b.total !== 0);
-  const openingConsensusSpread = round1(avg(openingSpreads.map((b) => b.spread)));
-  const openingConsensusTotal = round1(avg(openingTotals.map((b) => b.total)));
+  const openingConsensusSpread = roundHalf(avg(openingSpreads.map((b) => b.spread)));
+  const openingConsensusTotal = roundHalf(avg(openingTotals.map((b) => b.total)));
 
   const currentByBook: Record<string, OddsSnapshot> = {};
   for (const s of sorted) {
@@ -123,8 +127,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
   const currentBooks = Object.values(currentByBook).map(toBookLine);
   const currentSpreadsValid = currentBooks.filter((b) => b.spread !== 0);
   const currentTotalsValid = currentBooks.filter((b) => b.total !== 0);
-  const currentConsensusSpread = round1(avg(currentSpreadsValid.map((b) => b.spread)));
-  const currentConsensusTotal = round1(avg(currentTotalsValid.map((b) => b.total)));
+  const currentConsensusSpread = roundHalf(avg(currentSpreadsValid.map((b) => b.spread)));
+  const currentConsensusTotal = roundHalf(avg(currentTotalsValid.map((b) => b.total)));
 
   const spreadMovement = round1(currentConsensusSpread - openingConsensusSpread);
   const totalMovement = round1(currentConsensusTotal - openingConsensusTotal);
@@ -167,8 +171,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
     const validTotals = bl.filter((b) => b.total !== 0);
     return {
       minutesBefore: minsBefore, label, books: bl,
-      consensusSpread: round1(avg(validSpreads.map((b) => b.spread))),
-      consensusTotal: round1(avg(validTotals.map((b) => b.total))),
+      consensusSpread: roundHalf(avg(validSpreads.map((b) => b.spread))),
+      consensusTotal: roundHalf(avg(validTotals.map((b) => b.total))),
     };
   });
   timeline.sort((a, b) => b.minutesBefore - a.minutesBefore);
@@ -393,6 +397,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Claude returned empty response' });
     }
 
+    // Extract bet signal from Sharp Read section
+    const sharpReadMatch = narrative.match(/5\.\s*Sharp Read:\s*(.*?)(?=\n\n|\n6\.)/s);
+    const sharpReadText = sharpReadMatch?.[1]?.trim() || '';
+    // Extract the action (FOLLOW THE SIGNAL, FADE THE PUBLIC, NO EDGE - PASS, etc.)
+    const actionMatch = sharpReadText.match(/(FOLLOW THE SIGNAL|FADE THE PUBLIC|NO EDGE\s*[-–—]\s*PASS|SHARP CONSENSUS|PASS)/i);
+    const signalAction = actionMatch?.[1]?.toUpperCase() || '';
+    // Extract team and spread from Sharp Read (e.g., "Kentucky +10.5" or "Michigan -12.5")
+    const betMatch = sharpReadText.match(/(?:on\s+|[-–—]\s*)([\w\s.'']+?)\s+([+-]\d+\.?\d*)/);
+    const betTeam = betMatch?.[1]?.trim() || '';
+    const betSpread = betMatch?.[2] || '';
+
+    // Compute totals data
+    const totalsOpen = summary.opening.consensusTotal;
+    const totalsCurrent = summary.current.consensusTotal;
+    const totalsMove = roundHalf(totalsCurrent - totalsOpen);
+
     // Store in claude_analyses
     const { error: insertError } = await supabase.from('claude_analyses').insert({
       league,
@@ -411,6 +431,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cached: false,
       snapshot_count: summary.snapshotCount,
       tracking_hours: summary.trackingHours,
+      signal_action: signalAction,
+      bet_team: betTeam,
+      bet_spread: betSpread,
+      totals_open: totalsOpen,
+      totals_current: totalsCurrent,
+      totals_move: totalsMove,
       input_tokens: response.usage?.input_tokens,
       output_tokens: response.usage?.output_tokens,
     });

@@ -358,6 +358,8 @@ export function useGamesFeed() {
 
         const openingSpread = bestOdds.opening?.spread ?? null;
         const currentSpread = bestOdds.current?.spread ?? null;
+        const openingTotal = bestOdds.opening?.total ?? null;
+        const currentTotal = bestOdds.current?.total ?? null;
 
         const lineMoveAmount =
           openingSpread !== null && currentSpread !== null
@@ -417,6 +419,11 @@ export function useGamesFeed() {
           hsaStatus: deriveHsaStatus(narrative),
           hsaSnippet,
           hsaNarrative: narrative && narrative !== 'NO_NARRATIVE' ? narrative : null,
+          hsaBetTeam: null,
+          hsaBetSpread: null,
+          hsaSignalAction: null,
+          openingTotal,
+          currentTotal,
           isLocked: t.is_locked ?? false,
           lastUpdated:
             alert?.detected_at ??
