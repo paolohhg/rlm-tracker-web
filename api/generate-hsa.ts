@@ -95,7 +95,9 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
     };
   }
 
-  const sorted = [...snapshots].sort(
+  // Filter out snapshots where book hasn't posted a real spread (0 = no line)
+  const withSpread = snapshots.filter((s) => s.spread !== 0 && s.spread != null);
+  const sorted = [...(withSpread.length ? withSpread : snapshots)].sort(
     (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
   );
 
@@ -109,16 +111,20 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
     if (!openingByBook[s.bookmaker]) openingByBook[s.bookmaker] = s;
   }
   const openingBooks = Object.values(openingByBook).map(toBookLine);
-  const openingConsensusSpread = round1(avg(openingBooks.map((b) => b.spread)));
-  const openingConsensusTotal = round1(avg(openingBooks.map((b) => b.total)));
+  const openingSpreads = openingBooks.filter((b) => b.spread !== 0);
+  const openingTotals = openingBooks.filter((b) => b.total !== 0);
+  const openingConsensusSpread = round1(avg(openingSpreads.map((b) => b.spread)));
+  const openingConsensusTotal = round1(avg(openingTotals.map((b) => b.total)));
 
   const currentByBook: Record<string, OddsSnapshot> = {};
   for (const s of sorted) {
     currentByBook[s.bookmaker] = s;
   }
   const currentBooks = Object.values(currentByBook).map(toBookLine);
-  const currentConsensusSpread = round1(avg(currentBooks.map((b) => b.spread)));
-  const currentConsensusTotal = round1(avg(currentBooks.map((b) => b.total)));
+  const currentSpreadsValid = currentBooks.filter((b) => b.spread !== 0);
+  const currentTotalsValid = currentBooks.filter((b) => b.total !== 0);
+  const currentConsensusSpread = round1(avg(currentSpreadsValid.map((b) => b.spread)));
+  const currentConsensusTotal = round1(avg(currentTotalsValid.map((b) => b.total)));
 
   const spreadMovement = round1(currentConsensusSpread - openingConsensusSpread);
   const totalMovement = round1(currentConsensusTotal - openingConsensusTotal);
@@ -134,7 +140,7 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
 
   const velocityPerHour = trackingHours > 0 ? round1(Math.abs(spreadMovement) / trackingHours) : 0;
 
-  const currentSpreads = currentBooks.map((b) => b.spread);
+  const currentSpreads = currentBooks.map((b) => b.spread).filter((s) => s !== 0);
   const maxBookDisagreement =
     currentSpreads.length > 1
       ? round1(Math.max(...currentSpreads) - Math.min(...currentSpreads))
@@ -157,10 +163,12 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
     const booksInGroup: Record<string, OddsSnapshot> = {};
     for (const s of group) booksInGroup[s.bookmaker] = s;
     const bl = Object.values(booksInGroup).map(toBookLine);
+    const validSpreads = bl.filter((b) => b.spread !== 0);
+    const validTotals = bl.filter((b) => b.total !== 0);
     return {
       minutesBefore: minsBefore, label, books: bl,
-      consensusSpread: round1(avg(bl.map((b) => b.spread))),
-      consensusTotal: round1(avg(bl.map((b) => b.total))),
+      consensusSpread: round1(avg(validSpreads.map((b) => b.spread))),
+      consensusTotal: round1(avg(validTotals.map((b) => b.total))),
     };
   });
   timeline.sort((a, b) => b.minutesBefore - a.minutesBefore);
@@ -221,11 +229,21 @@ function buildHsaPrompt(league: string, awayTeam: string, homeTeam: string, game
 
   const headerLine = `${homeTeam} ${summary.opening.consensusSpread} → ${summary.current.consensusSpread} ${signalType}`;
 
+  // Determine which team is favored for context
+  const homeFavored = summary.current.consensusSpread < 0;
+  const favoriteTeam = homeFavored ? homeTeam : awayTeam;
+  const underdogTeam = homeFavored ? awayTeam : homeTeam;
+  const currentAbsSpreadForContext = Math.abs(summary.current.consensusSpread);
+
   return `You are a sharp sports betting analyst generating a "Heard Sports Analysis" (HSA) report. You specialize in identifying sharp action, reverse line movement, contra-public signals, and market inefficiencies across multiple sportsbooks.
 
 GAME: ${awayTeam} @ ${homeTeam}
 LEAGUE: ${league}
 GAME TIME: ${gameTime}
+
+IMPORTANT SPREAD CONVENTION: All spreads are from ${homeTeam} (HOME) perspective. A negative spread means ${homeTeam} is favored. A positive spread means ${awayTeam} is favored.
+CURRENT MARKET: ${favoriteTeam} is favored by ${currentAbsSpreadForContext}. ${underdogTeam} is the underdog at +${currentAbsSpreadForContext}.
+When making your Sharp Read, use the CORRECT team with the CORRECT sign. The favorite gets the minus (-), the underdog gets the plus (+). For example: "${underdogTeam} +${currentAbsSpreadForContext}" or "${favoriteTeam} -${currentAbsSpreadForContext}".
 
 === MARKET DATA ===
 Tracking: ${summary.snapshotCount} snapshots over ${summary.trackingHours} hours
