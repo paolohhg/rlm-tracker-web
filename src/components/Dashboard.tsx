@@ -623,8 +623,15 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
 
       {/* Betting splits */}
       {(game.publicBetsPct !== null || game.publicMoneyPct !== null || game.booksAgreeing !== null) && (() => {
-        const awayShort = game.awayTeam.split(' ').slice(0, -1).join(' ') || game.awayTeam;
-        const homeShort = game.homeTeam.split(' ').slice(0, -1).join(' ') || game.homeTeam;
+        // For NCAAB use first word (school), for NBA use all but last word (city)
+        const shortName = (name: string) => {
+          const parts = name.split(' ');
+          if (parts.length <= 2) return parts[0];
+          // NBA teams: "Los Angeles Lakers" → "Los Angeles"; NCAAB: "Alabama Crimson Tide" → "Alabama"
+          return game.league === 'NBA' ? parts.slice(0, -1).join(' ') : parts[0];
+        };
+        const awayShort = shortName(game.awayTeam);
+        const homeShort = shortName(game.homeTeam);
         const awayBets = game.awayBetsPct ?? (game.publicBetsPct != null ? 100 - game.publicBetsPct : null);
         const homeBets = game.publicBetsPct;
         const awayMoney = game.awayMoneyPct ?? (game.publicMoneyPct != null ? 100 - game.publicMoneyPct : null);
