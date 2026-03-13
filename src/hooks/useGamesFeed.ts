@@ -58,12 +58,7 @@ function normalizeTeamName(name: string | null | undefined): string {
 
   const raw = name
     .toLowerCase()
-    // Normalize accented characters
-    .replace(/[éèêë]/g, 'e')
-    .replace(/[áàâä]/g, 'a')
-    .replace(/[íìîï]/g, 'i')
-    .replace(/[óòôö]/g, 'o')
-    .replace(/[úùûü]/g, 'u')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // strip all accents (é→e, ñ→n, etc.)
     .replace(/[.''()]/g, '')   // remove punctuation (not hyphen)
     .replace(/-/g, ' ')        // hyphen → space (keeps "UT-Arlington" as "ut arlington")
     .replace(/\s*&\s*/g, ' and ')  // & → " and " with spaces
@@ -72,6 +67,7 @@ function normalizeTeamName(name: string | null | undefined): string {
     .replace(/ st$/, ' state')     // trailing "St" (edge case)
     .replace(/ univ /g, ' university ')  // "Boston Univ." → "Boston University"
     .replace(/ univ$/, ' university')
+    .replace(/^csu /g, 'cal state ')    // "CSU Fullerton" → "Cal State Fullerton"
     .replace(/\s+/g, ' ')
     .trim();
 
