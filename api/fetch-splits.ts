@@ -1,3 +1,5 @@
+// Polls Action Network public API for betting splits (ticket % and money %)
+// Runs every 10 min via Vercel cron (see vercel.json)
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
