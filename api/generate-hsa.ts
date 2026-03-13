@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
-import { summarizeOdds } from './lib/odds-summarizer';
-import { buildHsaPrompt } from './lib/hsa-prompt';
+import { summarizeOdds } from './_lib/odds-summarizer';
+import { buildHsaPrompt } from './_lib/hsa-prompt';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
