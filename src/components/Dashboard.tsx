@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useGamesFeed } from '../hooks/useGamesFeed';
 import { useGenerateHsa } from '../hooks/useGenerateHsa';
+import { useHMCycles } from '../hooks/useHMCycles';
 import type { GameView } from '../types';
 
 type StatusFilter = 'all' | 'upcoming' | 'live' | 'final';
@@ -385,7 +386,7 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
   );
 }
 
-function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void }) {
+function GameCard({ game, ncaabLogos, onOpenHsa, onLogCycle }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onLogCycle: (game: GameView) => void }) {
   const signalBg = signalColor(game.signalTier);
 
   return (
@@ -691,6 +692,28 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
         );
       })()}
 
+      {/* Log HM Cycle button */}
+      {game.sharpTeam && (game.status === 'upcoming' || game.status === 'live') && (
+        <button
+          onClick={() => onLogCycle(game)}
+          style={{
+            background: 'transparent',
+            border: '1px solid rgba(139,92,246,0.4)',
+            color: '#a78bfa',
+            borderRadius: '10px',
+            padding: '8px 12px',
+            cursor: 'pointer',
+            fontWeight: 900,
+            fontSize: '12px',
+            fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+            width: '100%',
+            textAlign: 'center' as const,
+          }}
+        >
+          + Log HM Cycle
+        </button>
+      )}
+
       <div
         onClick={() => onOpenHsa(game)}
         style={{ cursor: 'pointer' }}
@@ -772,6 +795,99 @@ function GameCard({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos:
   );
 }
 
+function LogCycleModal({ game, onClose, onLog }: {
+  game: GameView;
+  onClose: () => void;
+  onLog: (params: { game_id: string; league: string; away_team: string; home_team: string; game_date: string; game_time: string; signal_tier?: string; sharp_side: string; sharp_spread: string; h1_units: number }) => Promise<void>;
+}) {
+  const [units, setUnits] = useState('1');
+  const [spread, setSpread] = useState(game.currentSpread !== null ? String(game.currentSpread) : '');
+  const [saving, setSaving] = useState(false);
+  const sharpSide = game.sharpTeam || '';
+
+  const handleLog = async () => {
+    if (!sharpSide || !spread) return;
+    setSaving(true);
+    try {
+      await onLog({
+        game_id: game.id,
+        league: game.league,
+        away_team: game.awayTeam,
+        home_team: game.homeTeam,
+        game_date: new Date(game.gameTime).toISOString().split('T')[0],
+        game_time: game.gameTime,
+        signal_tier: game.signalTier ?? undefined,
+        sharp_side: sharpSide,
+        sharp_spread: spread,
+        h1_units: parseFloat(units) || 1,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    background: '#020617',
+    border: '1px solid rgba(255,255,255,0.1)',
+    color: '#e2e8f0',
+    borderRadius: '8px',
+    padding: '8px 10px',
+    fontWeight: 700,
+    fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+    fontSize: '13px',
+    width: '100%',
+    boxSizing: 'border-box',
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '16px', padding: '24px', maxWidth: '400px', width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+        <div style={{ color: '#f8fafc', fontWeight: 900, fontSize: '17px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif', marginBottom: '4px' }}>
+          Log HM Cycle
+        </div>
+        <div style={{ color: '#64748b', fontSize: '12px', fontWeight: 700, marginBottom: '20px' }}>
+          {game.awayTeam} @ {game.homeTeam} • {game.league}
+        </div>
+
+        <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', marginBottom: '16px' }}>
+          <div style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase' as const, fontWeight: 800, letterSpacing: '0.08em', marginBottom: '4px' }}>Sharp Side</div>
+          <div style={{ color: '#a78bfa', fontWeight: 900, fontSize: '15px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+            {sharpSide || '—'}
+          </div>
+          {game.signalTier && (
+            <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 700, marginTop: '3px' }}>{game.signalTier}</div>
+          )}
+        </div>
+
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase' as const, fontWeight: 800, letterSpacing: '0.08em', marginBottom: '6px' }}>Spread</div>
+          <input value={spread} onChange={(e) => setSpread(e.target.value)} placeholder="e.g. +4.5 or -7" style={inputStyle} />
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase' as const, fontWeight: 800, letterSpacing: '0.08em', marginBottom: '6px' }}>1H Units</div>
+          <input value={units} onChange={(e) => setUnits(e.target.value)} placeholder="1" type="number" min="0.5" step="0.5" style={inputStyle} />
+          <div style={{ color: '#475569', fontSize: '11px', marginTop: '4px', fontWeight: 600 }}>2H recovery = {((parseFloat(units) || 1) * 2).toFixed(1)} units (auto)</div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={onClose} style={{ flex: 1, background: 'transparent', border: '1px solid #334155', color: '#94a3b8', borderRadius: '8px', padding: '10px', cursor: 'pointer', fontWeight: 800, fontSize: '13px' }}>
+            Cancel
+          </button>
+          <button
+            onClick={handleLog}
+            disabled={!sharpSide || !spread || saving}
+            style={{ flex: 2, background: '#7c3aed', border: 'none', color: '#fff', borderRadius: '8px', padding: '10px', cursor: 'pointer', fontWeight: 900, fontSize: '13px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}
+          >
+            {saving ? 'Logging...' : 'Log Cycle'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const { games, loading, lastUpdated, refresh } = useGamesFeed();
   const [ncaabLogos, setNcaabLogos] = useState<Record<string, string>>({});
@@ -780,10 +896,12 @@ export function Dashboard() {
     fetchNcaabLogoMap().then(setNcaabLogos);
   }, []);
 
+  const { logCycle } = useHMCycles();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('live');
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
+  const [logCycleGame, setLogCycleGame] = useState<GameView | null>(null);
 
   const filteredGames = useMemo(() => {
     let result = [...games];
@@ -1025,13 +1143,20 @@ export function Dashboard() {
             }}
           >
             {filteredGames.map((game) => (
-              <GameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} />
+              <GameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onLogCycle={setLogCycleGame} />
             ))}
           </div>
         )}
       </div>
 
       {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={refresh} />}
+      {logCycleGame && (
+        <LogCycleModal
+          game={logCycleGame}
+          onClose={() => setLogCycleGame(null)}
+          onLog={logCycle}
+        />
+      )}
     </div>
   );
 }
