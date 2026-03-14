@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useGamesFeed } from '../hooks/useGamesFeed';
 import { useGenerateHsa } from '../hooks/useGenerateHsa';
 import { useHMCycles } from '../hooks/useHMCycles';
