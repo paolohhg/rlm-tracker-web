@@ -274,9 +274,9 @@ export function useGamesFeed() {
         splitsRes,
         espnScores,
       ] = await Promise.all([
-        supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date().toLocaleDateString('en-CA')).order('game_time', { ascending: true }),
+        supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('game_time', { ascending: true }),
         supabase.from('rlm_alerts').select('*').order('detected_at', { ascending: false }),
-        supabase.from('odds_snapshots').select('*').gte('game_time', new Date().toLocaleDateString('en-CA')).order('fetched_at', { ascending: false }),
+        supabase.from('odds_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('fetched_at', { ascending: false }),
         supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
         supabase.from('splits_snapshots').select('*').order('fetched_at', { ascending: false }),
