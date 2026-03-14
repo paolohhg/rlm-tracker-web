@@ -692,27 +692,25 @@ function GameCard({ game, ncaabLogos, onOpenHsa, onLogCycle }: { game: GameView;
         );
       })()}
 
-      {/* Log HM Cycle button */}
-      {game.sharpTeam && (game.status === 'upcoming' || game.status === 'live') && (
-        <button
-          onClick={() => onLogCycle(game)}
-          style={{
-            background: 'transparent',
-            border: '1px solid rgba(139,92,246,0.4)',
-            color: '#a78bfa',
-            borderRadius: '10px',
-            padding: '8px 12px',
-            cursor: 'pointer',
-            fontWeight: 900,
-            fontSize: '12px',
-            fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
-            width: '100%',
-            textAlign: 'center' as const,
-          }}
-        >
-          + Log HM Cycle
-        </button>
-      )}
+      {/* Log HM Cycle button — always visible */}
+      <button
+        onClick={() => onLogCycle(game)}
+        style={{
+          background: 'transparent',
+          border: '1px solid rgba(139,92,246,0.4)',
+          color: '#a78bfa',
+          borderRadius: '10px',
+          padding: '8px 12px',
+          cursor: 'pointer',
+          fontWeight: 900,
+          fontSize: '12px',
+          fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+          width: '100%',
+          textAlign: 'center' as const,
+        }}
+      >
+        + Log HM Cycle
+      </button>
 
       <div
         onClick={() => onOpenHsa(game)}
@@ -802,8 +800,8 @@ function LogCycleModal({ game, onClose, onLog }: {
 }) {
   const [units, setUnits] = useState('1');
   const [spread, setSpread] = useState(game.currentSpread !== null ? String(game.currentSpread) : '');
+  const [sharpSide, setSharpSide] = useState(game.sharpTeam || '');
   const [saving, setSaving] = useState(false);
-  const sharpSide = game.sharpTeam || '';
 
   const handleLog = async () => {
     if (!sharpSide || !spread) return;
@@ -850,13 +848,34 @@ function LogCycleModal({ game, onClose, onLog }: {
           {game.awayTeam} @ {game.homeTeam} • {game.league}
         </div>
 
-        <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 12px', marginBottom: '16px' }}>
-          <div style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase' as const, fontWeight: 800, letterSpacing: '0.08em', marginBottom: '4px' }}>Sharp Side</div>
-          <div style={{ color: '#a78bfa', fontWeight: 900, fontSize: '15px', fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
-            {sharpSide || '—'}
+        <div style={{ marginBottom: '14px' }}>
+          <div style={{ color: '#94a3b8', fontSize: '10px', textTransform: 'uppercase' as const, fontWeight: 800, letterSpacing: '0.08em', marginBottom: '6px' }}>
+            Sharp Side {game.sharpTeam ? '(auto-detected)' : '(manual — pick a team)'}
           </div>
-          {game.signalTier && (
-            <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 700, marginTop: '3px' }}>{game.signalTier}</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {[game.awayTeam, game.homeTeam].map((team) => (
+              <button
+                key={team}
+                onClick={() => setSharpSide(team)}
+                style={{
+                  flex: 1,
+                  background: sharpSide === team ? '#7c3aed' : '#020617',
+                  border: `1px solid ${sharpSide === team ? '#7c3aed' : 'rgba(255,255,255,0.1)'}`,
+                  color: sharpSide === team ? '#fff' : '#94a3b8',
+                  borderRadius: '8px',
+                  padding: '8px 6px',
+                  cursor: 'pointer',
+                  fontWeight: 900,
+                  fontSize: '11px',
+                  fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+                }}
+              >
+                {team}
+              </button>
+            ))}
+          </div>
+          {game.signalTier && game.signalTier !== 'TRACKING' && (
+            <div style={{ color: '#64748b', fontSize: '11px', fontWeight: 700, marginTop: '6px' }}>Signal: {game.signalTier}</div>
           )}
         </div>
 
