@@ -796,7 +796,7 @@ function GameCard({ game, ncaabLogos, onOpenHsa, onLogCycle }: { game: GameView;
 function LogCycleModal({ game, onClose, onLog }: {
   game: GameView;
   onClose: () => void;
-  onLog: (params: { game_id: string; league: string; away_team: string; home_team: string; game_date: string; game_time: string; signal_tier?: string; sharp_side: string; sharp_spread: string; h1_units: number }) => Promise<void>;
+  onLog: (params: { game_id: string; league: string; away_team: string; home_team: string; game_date: string; game_time: string; signal_tier?: string; sharp_side: string; sharp_spread: string; h1_units: number }) => Promise<unknown>;
 }) {
   const [units, setUnits] = useState('1');
   const [spread, setSpread] = useState(game.currentSpread !== null ? String(game.currentSpread) : '');
