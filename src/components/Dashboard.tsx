@@ -359,7 +359,7 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
               No analysis available for this game yet.
             </div>
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
               disabled={loading}
               style={{
                 background: loading ? '#1e40af' : '#2563eb',
