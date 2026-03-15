@@ -5,6 +5,7 @@ interface GenerateParams {
   home_team: string;
   away_team: string;
   game_time: string;
+  force?: boolean;
 }
 
 interface HsaResult {
