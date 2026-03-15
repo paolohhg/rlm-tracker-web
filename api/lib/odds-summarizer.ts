@@ -57,6 +57,16 @@ export interface OddsSummary {
     crossedKeyNumber: boolean;
     keyNumbersNear: number[];
   };
+  totalSharpIndicators: {
+    totalSteamMove: boolean;
+    totalSteamDetail: string | null;
+    totalSteamDirection: 'over' | 'under' | null;
+    frozenTotal: boolean;
+    totalVelocityPerHour: number;
+    highestTotalSeen: number;
+    lowestTotalSeen: number;
+    totalBookDisagreement: number;
+  };
 }
 
 function avg(nums: number[]): number {
@@ -109,6 +119,16 @@ export function summarizeOdds(
         frozenLine: false,
         crossedKeyNumber: false,
         keyNumbersNear: [],
+      },
+      totalSharpIndicators: {
+        totalSteamMove: false,
+        totalSteamDetail: null,
+        totalSteamDirection: null,
+        frozenTotal: false,
+        totalVelocityPerHour: 0,
+        highestTotalSeen: 0,
+        lowestTotalSeen: 0,
+        totalBookDisagreement: 0,
       },
     };
   }
@@ -231,6 +251,36 @@ export function summarizeOdds(
     (k) => Math.abs(currentAbsSpread - k) <= 1
   );
 
+  // Totals sharp indicators
+  let totalSteamMove = false;
+  let totalSteamDetail: string | null = null;
+  let totalSteamDirection: 'over' | 'under' | null = null;
+  for (let i = 1; i < timeline.length; i++) {
+    const diff = timeline[i].consensusTotal - timeline[i - 1].consensusTotal;
+    const absDiff = Math.abs(diff);
+    const timeDiff = timeline[i - 1].minutesBefore - timeline[i].minutesBefore;
+    if (absDiff >= 1 && timeDiff <= 30) {
+      totalSteamMove = true;
+      totalSteamDirection = diff > 0 ? 'over' : 'under';
+      totalSteamDetail = `${absDiff}-point total move in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      break;
+    }
+  }
+
+  const frozenTotal = trackingHours >= 2 && Math.abs(totalMovement) < 0.5;
+  const totalVelocityPerHour =
+    trackingHours > 0 ? round1(Math.abs(totalMovement) / trackingHours) : 0;
+
+  const timelineTotals = timeline.map((t) => t.consensusTotal).filter((t) => t > 0);
+  const highestTotalSeen = timelineTotals.length ? round1(Math.max(...timelineTotals)) : openingConsensusTotal;
+  const lowestTotalSeen = timelineTotals.length ? round1(Math.min(...timelineTotals)) : openingConsensusTotal;
+
+  const currentTotalsArr = currentBooks.map((b) => b.total).filter((t) => t > 0);
+  const totalBookDisagreement =
+    currentTotalsArr.length > 1
+      ? round1(Math.max(...currentTotalsArr) - Math.min(...currentTotalsArr))
+      : 0;
+
   return {
     snapshotCount: snapshots.length,
     trackingHours,
@@ -260,6 +310,16 @@ export function summarizeOdds(
       frozenLine,
       crossedKeyNumber,
       keyNumbersNear,
+    },
+    totalSharpIndicators: {
+      totalSteamMove,
+      totalSteamDetail,
+      totalSteamDirection,
+      frozenTotal,
+      totalVelocityPerHour,
+      highestTotalSeen,
+      lowestTotalSeen,
+      totalBookDisagreement,
     },
   };
 }

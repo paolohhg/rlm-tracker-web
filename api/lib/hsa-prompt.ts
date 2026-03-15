@@ -58,11 +58,18 @@ Frozen line: ${summary.sharpIndicators.frozenLine ? 'YES - line barely moved des
 Crossed key number: ${summary.sharpIndicators.crossedKeyNumber ? 'YES' : 'No'}
 Key numbers nearby: ${summary.sharpIndicators.keyNumbersNear.length ? summary.sharpIndicators.keyNumbersNear.join(', ') : 'none'}
 
+TOTALS SHARP INDICATORS:
+Total steam move: ${summary.totalSharpIndicators.totalSteamMove ? `YES - ${summary.totalSharpIndicators.totalSteamDetail} (${summary.totalSharpIndicators.totalSteamDirection})` : 'No'}
+Frozen total: ${summary.totalSharpIndicators.frozenTotal ? 'YES - total barely moved despite extended tracking' : 'No'}
+Total velocity: ${summary.totalSharpIndicators.totalVelocityPerHour} pts/hr
+Total book disagreement: ${summary.totalSharpIndicators.totalBookDisagreement} pts
+Highest total seen: ${summary.totalSharpIndicators.highestTotalSeen} / Lowest: ${summary.totalSharpIndicators.lowestTotalSeen}
+
 === LINE MOVEMENT TIMELINE ===
 ${timelineStr}
 
 === ANALYSIS INSTRUCTIONS ===
-Write a 150-250 word narrative analysis covering these areas IN ORDER OF IMPORTANCE:
+Write a 200-350 word narrative analysis covering these areas IN ORDER OF IMPORTANCE:
 
 1. LINE MOVEMENT STORY: What happened to the spread from open to now? Did it move sharply or gradually? Did it cross any key numbers (3, 7, 10 in basketball)?
 
@@ -74,11 +81,13 @@ Write a 150-250 word narrative analysis covering these areas IN ORDER OF IMPORTA
 
 5. VELOCITY & TIMING: How fast did the line move? Rapid movement suggests steam/sharp action. Slow grinding movement suggests public action.
 
+6. TOTALS INTEL: Analyze the totals market independently. Is the total moving with or against public expectations? Was there a steam move or frozen total? State the likely sharp total side (Over/Under) with confidence, or say PASS if no signal.
+
 FORMAT RULES:
 - Write in direct, confident analyst voice
 - Lead with the most significant finding
 - Use specific numbers (e.g., "opened -3.5, now -4.5 across all three books")
-- End with a one-sentence "BOTTOM LINE:" assessment
+- End with a one-sentence "BOTTOM LINE:" assessment covering both spread and totals
 - Do NOT give betting advice or picks - describe what the market is telling us
 - Do NOT use bullet points - write in flowing paragraphs
 - Do NOT use markdown formatting`;

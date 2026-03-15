@@ -430,6 +430,18 @@ export function useGamesFeed() {
           hsaSignalAction: null,
           openingTotal,
           currentTotal,
+          totalMove:
+            openingTotal !== null && currentTotal !== null
+              ? parseFloat((currentTotal - openingTotal).toFixed(1))
+              : null,
+          highestTotalSeen: null,
+          lowestTotalSeen: null,
+          overTicketPct: split?.total_over_ticket_pct ?? null,
+          underTicketPct: split?.total_under_ticket_pct ?? null,
+          overMoneyPct: split?.total_over_money_pct ?? null,
+          underMoneyPct: split?.total_under_money_pct ?? null,
+          totalSignalType: null,
+          totalVelocityPerHour: null,
           isLocked: t.is_locked ?? false,
           lastUpdated:
             alert?.detected_at ??

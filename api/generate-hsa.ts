@@ -53,6 +53,16 @@ interface OddsSummary {
     crossedKeyNumber: boolean;
     keyNumbersNear: number[];
   };
+  totalSharpIndicators: {
+    totalSteamMove: boolean;
+    totalSteamDetail: string | null;
+    totalSteamDirection: 'over' | 'under' | null;
+    frozenTotal: boolean;
+    totalVelocityPerHour: number;
+    highestTotalSeen: number;
+    lowestTotalSeen: number;
+    totalBookDisagreement: number;
+  };
 }
 
 // ── Odds Summarizer ────────────────────────────────────────────────
@@ -96,6 +106,7 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
       spreadMovement: 0, totalMovement: 0, spreadDirection: 'stable', totalDirection: 'stable',
       velocityPerHour: 0, maxBookDisagreement: 0, timeline: [],
       sharpIndicators: { steamMove: false, steamDetail: null, frozenLine: false, crossedKeyNumber: false, keyNumbersNear: [] },
+      totalSharpIndicators: { totalSteamMove: false, totalSteamDetail: null, totalSteamDirection: null, frozenTotal: false, totalVelocityPerHour: 0, highestTotalSeen: 0, lowestTotalSeen: 0, totalBookDisagreement: 0 },
     };
   }
 
@@ -199,18 +210,45 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
   );
   const keyNumbersNear = BASKETBALL_KEY_NUMBERS.filter((k) => Math.abs(currentAbsSpread - k) <= 1);
 
+  // Totals sharp indicators
+  let totalSteamMove = false;
+  let totalSteamDetail: string | null = null;
+  let totalSteamDirection: 'over' | 'under' | null = null;
+  for (let i = 1; i < timeline.length; i++) {
+    const diff = timeline[i].consensusTotal - timeline[i - 1].consensusTotal;
+    const absDiff = Math.abs(diff);
+    const timeDiff = timeline[i - 1].minutesBefore - timeline[i].minutesBefore;
+    if (absDiff >= 1 && timeDiff <= 30) {
+      totalSteamMove = true;
+      totalSteamDirection = diff > 0 ? 'over' : 'under';
+      totalSteamDetail = `${absDiff}-point total move in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      break;
+    }
+  }
+
+  const frozenTotal = trackingHours >= 2 && Math.abs(totalMovement) < 0.5;
+  const totalVelocityPerHour = trackingHours > 0 ? round1(Math.abs(totalMovement) / trackingHours) : 0;
+
+  const timelineTotals = timeline.map((t) => t.consensusTotal).filter((t) => t > 0);
+  const highestTotalSeen = timelineTotals.length ? round1(Math.max(...timelineTotals)) : openingConsensusTotal;
+  const lowestTotalSeen = timelineTotals.length ? round1(Math.min(...timelineTotals)) : openingConsensusTotal;
+
+  const currentTotalsArr = currentBooks.map((b) => b.total).filter((t) => t > 0);
+  const totalBookDisagreement = currentTotalsArr.length > 1 ? round1(Math.max(...currentTotalsArr) - Math.min(...currentTotalsArr)) : 0;
+
   return {
     snapshotCount: snapshots.length, trackingHours, books,
     opening: { time: firstTime, books: openingBooks, consensusSpread: openingConsensusSpread, consensusTotal: openingConsensusTotal },
     current: { time: lastTime, books: currentBooks, consensusSpread: currentConsensusSpread, consensusTotal: currentConsensusTotal },
     spreadMovement, totalMovement, spreadDirection, totalDirection, velocityPerHour, maxBookDisagreement, timeline,
     sharpIndicators: { steamMove, steamDetail, frozenLine, crossedKeyNumber, keyNumbersNear },
+    totalSharpIndicators: { totalSteamMove, totalSteamDetail, totalSteamDirection, frozenTotal, totalVelocityPerHour, highestTotalSeen, lowestTotalSeen, totalBookDisagreement },
   };
 }
 
 // ── HSA Prompt Builder ─────────────────────────────────────────────
 
-function buildHsaPrompt(league: string, awayTeam: string, homeTeam: string, gameTime: string, summary: OddsSummary, splits?: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null): string {
+function buildHsaPrompt(league: string, awayTeam: string, homeTeam: string, gameTime: string, summary: OddsSummary, splits?: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null, totalsSplits?: { overTicketPct: number; underTicketPct: number; overMoneyPct: number; underMoneyPct: number } | null): string {
   const timelineStr = summary.timeline
     .map((t) => `${t.label}: spread ${t.consensusSpread} | total ${t.consensusTotal} [${t.books.map((b) => `${b.book}: ${b.spread}/${b.total}`).join(', ')}]`)
     .join('\n');
@@ -272,6 +310,13 @@ Steam move: ${summary.sharpIndicators.steamMove ? `YES - ${summary.sharpIndicato
 Frozen line: ${summary.sharpIndicators.frozenLine ? 'YES - line barely moved despite extended tracking' : 'No'}
 Crossed key number: ${summary.sharpIndicators.crossedKeyNumber ? 'YES' : 'No'}
 Key numbers nearby: ${summary.sharpIndicators.keyNumbersNear.length ? summary.sharpIndicators.keyNumbersNear.join(', ') : 'none'}
+
+TOTALS SHARP INDICATORS:
+Total steam move: ${summary.totalSharpIndicators.totalSteamMove ? `YES - ${summary.totalSharpIndicators.totalSteamDetail} (${summary.totalSharpIndicators.totalSteamDirection})` : 'No'}
+Frozen total: ${summary.totalSharpIndicators.frozenTotal ? 'YES - total barely moved despite extended tracking' : 'No'}
+Total velocity: ${summary.totalSharpIndicators.totalVelocityPerHour} pts/hr
+Total book disagreement: ${summary.totalSharpIndicators.totalBookDisagreement} pts
+Highest total seen: ${summary.totalSharpIndicators.highestTotalSeen} / Lowest: ${summary.totalSharpIndicators.lowestTotalSeen}
 ${splits ? `
 === BETTING SPLITS (from Action Network) ===
 Total bets tracked: ${splits.numBets.toLocaleString()}
@@ -281,6 +326,13 @@ ${splits.awayBetsPct !== splits.awayMoneyPct ? `TICKET/MONEY DIVERGENCE: ${Math.
 ${(splits.awayBetsPct > 50 && splits.awayMoneyPct < splits.awayBetsPct) || (splits.homeBetsPct > 50 && splits.homeMoneyPct < splits.homeBetsPct) ? 'NOTE: Public side getting more tickets than money - possible sharp money on opposite side' : ''}` : `
 === BETTING SPLITS ===
 No betting splits data available for this game.`}
+${totalsSplits ? `
+=== TOTALS SPLITS (from Action Network) ===
+Over tickets: ${totalsSplits.overTicketPct}% / Under tickets: ${totalsSplits.underTicketPct}%
+Over money: ${totalsSplits.overMoneyPct}% / Under money: ${totalsSplits.underMoneyPct}%
+${Math.abs(totalsSplits.overTicketPct - totalsSplits.overMoneyPct) >= 5 ? `TOTALS TICKET/MONEY DIVERGENCE: ${Math.abs(totalsSplits.overTicketPct - totalsSplits.overMoneyPct)}% gap (Over ${totalsSplits.overTicketPct}% tickets vs ${totalsSplits.overMoneyPct}% money)` : 'Totals tickets and money aligned'}` : `
+=== TOTALS SPLITS ===
+No totals splits data available for this game.`}
 
 === LINE MOVEMENT TIMELINE ===
 ${timelineStr}
@@ -310,7 +362,9 @@ REQUIRED SECTIONS:
 - Any situational factors (conference tournament context, rivalry, travel, etc.)
 - What would indicate the sharp money was wrong
 
-End with a one-sentence closing summary of the overall market read.
+7. Totals Intel: Analyze the totals market independently from the spread. Cover these points in flowing prose: (a) Is the total moving with or against public over/under betting? If over tickets are heavy but the total dropped, that is a totals RLM signal toward the under, and vice versa. (b) Is there a ticket/money divergence on totals (e.g. 70% over tickets but only 48% over money)? (c) Is the total frozen while public bets one side heavily? (d) Was there a steam move on the total? State the likely sharp total side (Over or Under) with a confidence level (Low / Medium / Medium-High / High), or say PASS if no totals signal. If totals data is insufficient, say so briefly and move on.
+
+End with a one-sentence closing summary of the overall market read covering BOTH spread and totals.
 
 Add "Disclaimer: For research purposes only." at the very end.
 
@@ -318,10 +372,10 @@ FORMAT RULES:
 - Write in direct, confident, analyst voice - like a sharp bettor briefing his crew
 - Use specific numbers everywhere (spreads, totals, juice, specific book names)
 - Do NOT use asterisks, bold markdown, or any markdown formatting
-- Do NOT use bullet points with dashes in sections 1-5, write in flowing paragraphs
+- Do NOT use bullet points with dashes in sections 1-5 and 7, write in flowing paragraphs
 - Section 6 (Confirmation Factors) SHOULD use dashes for the list items
 - Each numbered section should be 2-4 sentences
-- Total length: 300-500 words`;
+- Total length: 400-600 words`;
 }
 
 // ── Vercel Handler ─────────────────────────────────────────────────
@@ -340,7 +394,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { league, home_team, away_team, game_time } = req.body || {};
+  const { league, home_team, away_team, game_time, force } = req.body || {};
 
   if (!league || !home_team || !away_team || !game_time) {
     return res.status(400).json({
@@ -359,7 +413,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('created_at', { ascending: false })
       .limit(1);
 
-    if (existing?.length) {
+    if (existing?.length && !force) {
       const age = Date.now() - new Date(existing[0].created_at).getTime();
       const twoHours = 2 * 60 * 60 * 1000;
       if (age < twoHours && existing[0].analysis) {
@@ -401,6 +455,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('fetched_at', { ascending: false })
       .limit(1);
 
+    let totalsSplitsData: { overTicketPct: number; underTicketPct: number; overMoneyPct: number; underMoneyPct: number } | null = null;
+
     if (splitsRows?.length) {
       const s = splitsRows[0];
       splitsData = {
@@ -410,10 +466,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         awayMoneyPct: s.away_money_pct,
         numBets: s.num_bets ?? 0,
       };
+      if (s.total_over_ticket_pct != null && s.total_under_ticket_pct != null) {
+        totalsSplitsData = {
+          overTicketPct: s.total_over_ticket_pct,
+          underTicketPct: s.total_under_ticket_pct,
+          overMoneyPct: s.total_over_money_pct ?? 0,
+          underMoneyPct: s.total_under_money_pct ?? 0,
+        };
+      }
     }
 
     // Build prompt and call Claude
-    const prompt = buildHsaPrompt(league, away_team, home_team, game_time, summary, splitsData);
+    const prompt = buildHsaPrompt(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -438,6 +502,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const betMatch = sharpReadText.match(/(?:on\s+|[-–—]\s*)([\w\s.'']+?)\s+([+-]\d+\.?\d*)/);
     const betTeam = betMatch?.[1]?.trim() || '';
     const betSpread = betMatch?.[2] || '';
+
+    // Extract totals signal from Totals Intel section
+    const totalsIntelMatch = narrative.match(/7\.\s*Totals Intel:\s*(.*?)(?=\n\n|End|Disclaimer|$)/s);
+    const totalsIntelText = totalsIntelMatch?.[1]?.trim() || '';
+    const totalsSharpSideMatch = totalsIntelText.match(/sharp total side[:\s]*(Over|Under)/i);
+    const totalsSharpSide = totalsSharpSideMatch?.[1] || null;
+    const totalsConfidenceMatch = totalsIntelText.match(/(Low|Medium-High|Medium|High)\s*confidence/i) || totalsIntelText.match(/confidence[:\s]*(Low|Medium-High|Medium|High)/i);
+    const totalsConfidence = totalsConfidenceMatch?.[1] || null;
+
+    // Derive totals signal type from indicators + Claude response
+    let totalsSignalType: string | null = null;
+    if (totalsSharpSide) {
+      const side = totalsSharpSide.toUpperCase();
+      if (summary.totalSharpIndicators.totalSteamMove) {
+        totalsSignalType = `TOTAL_STEAM_${side}`;
+      } else if (summary.totalMovement !== 0 && totalsSplitsData) {
+        // Check for RLM: public bets one way, total moves the other
+        const publicOver = totalsSplitsData.overTicketPct > totalsSplitsData.underTicketPct;
+        const totalMovedDown = summary.totalMovement < 0;
+        const totalMovedUp = summary.totalMovement > 0;
+        if ((publicOver && totalMovedDown) || (!publicOver && totalMovedUp)) {
+          totalsSignalType = `TOTAL_RLM_${side}`;
+        } else {
+          totalsSignalType = `TOTAL_SHARP_${side}`;
+        }
+      } else {
+        totalsSignalType = `TOTAL_SHARP_${side}`;
+      }
+    }
 
     // Compute totals data
     const totalsOpen = summary.opening.consensusTotal;
@@ -468,6 +561,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totals_open: totalsOpen,
       totals_current: totalsCurrent,
       totals_move: totalsMove,
+      totals_signal_type: totalsSignalType,
+      totals_sharp_side: totalsSharpSide,
+      totals_confidence: totalsConfidence,
+      totals_velocity: summary.totalSharpIndicators.totalVelocityPerHour,
+      highest_total_seen: summary.totalSharpIndicators.highestTotalSeen,
+      lowest_total_seen: summary.totalSharpIndicators.lowestTotalSeen,
       input_tokens: response.usage?.input_tokens,
       output_tokens: response.usage?.output_tokens,
     });

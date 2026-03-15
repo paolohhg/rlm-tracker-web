@@ -239,17 +239,18 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
   const [localNarrative, setLocalNarrative] = useState<string | null>(game.hsaNarrative);
   const { generate, loading, error } = useGenerateHsa(onRefresh);
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (forceRefresh = false) => {
     const result = await generate({
       league: game.league,
       home_team: game.homeTeam,
       away_team: game.awayTeam,
       game_time: game.gameTime,
+      force: forceRefresh || !!localNarrative,
     });
     if (result?.narrative) {
       setLocalNarrative(result.narrative);
     }
-  }, [generate, game]);
+  }, [generate, game, localNarrative]);
 
   const narrative = localNarrative;
 
@@ -329,8 +330,13 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
             >
               {narrative}
             </div>
+            {error && (
+              <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px', fontWeight: 600 }}>
+                {error}
+              </div>
+            )}
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate(true)}
               disabled={loading}
               style={{
                 marginTop: '12px',
@@ -598,27 +604,85 @@ function GameCard({ game, ncaabLogos, onOpenHsa, onLogCycle }: { game: GameView;
 
       {/* Totals */}
       {(game.openingTotal !== null || game.currentTotal !== null) && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
-          <div style={cardLabelStyle()}>Total</div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
-              {game.openingTotal ?? '—'}
-            </span>
-            <span style={{ color: '#475569', fontSize: '11px' }}>→</span>
-            <span style={{ color: '#f8fafc', fontSize: '12px', fontWeight: 900, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
-              {game.currentTotal ?? '—'}
-            </span>
-            {game.openingTotal !== null && game.currentTotal !== null && game.currentTotal !== game.openingTotal && (
-              <span style={{
-                color: game.currentTotal > game.openingTotal ? '#22c55e' : '#ef4444',
-                fontSize: '11px',
-                fontWeight: 800,
-                fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
-              }}>
-                {game.currentTotal > game.openingTotal ? '↑' : '↓'} {Math.abs(game.currentTotal - game.openingTotal).toFixed(1)}
+        <div style={{ padding: '6px 0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={cardLabelStyle()}>Total</div>
+              {game.totalSignalType && (
+                <span style={{
+                  fontSize: '9px',
+                  fontWeight: 900,
+                  color: game.totalSignalType.includes('STEAM') ? '#d97706' : '#ea580c',
+                  background: game.totalSignalType.includes('STEAM') ? 'rgba(217,119,6,0.15)' : 'rgba(234,88,12,0.15)',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+                }}>
+                  {game.totalSignalType.replace(/_/g, ' ')}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 700, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+                {game.openingTotal ?? '—'}
               </span>
-            )}
+              <span style={{ color: '#475569', fontSize: '11px' }}>→</span>
+              <span style={{ color: '#f8fafc', fontSize: '12px', fontWeight: 900, fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif' }}>
+                {game.currentTotal ?? '—'}
+              </span>
+              {game.openingTotal !== null && game.currentTotal !== null && game.currentTotal !== game.openingTotal && (
+                <span style={{
+                  color: game.currentTotal > game.openingTotal ? '#22c55e' : '#ef4444',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  fontFamily: '"Arial Black", "Segoe UI", Arial, sans-serif',
+                }}>
+                  {game.currentTotal > game.openingTotal ? '↑' : '↓'} {Math.abs(game.currentTotal - game.openingTotal).toFixed(1)}
+                </span>
+              )}
+            </div>
           </div>
+          {/* Totals splits */}
+          {game.overTicketPct !== null && game.underTicketPct !== null && (
+            <div style={{ marginTop: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 800, marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span>O/U Tickets</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, minWidth: '32px', textAlign: 'right' }}>{game.overTicketPct}%</div>
+                <div style={{ flex: 1, display: 'flex', height: '6px', borderRadius: '3px', overflow: 'hidden', background: '#1e293b' }}>
+                  <div style={{ width: `${game.overTicketPct}%`, background: '#22c55e', transition: 'width 0.3s' }} />
+                  <div style={{ width: `${game.underTicketPct}%`, background: '#ef4444', transition: 'width 0.3s' }} />
+                </div>
+                <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, minWidth: '32px' }}>{game.underTicketPct}%</div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#64748b', fontWeight: 700, marginTop: '1px' }}>
+                <span>Over</span>
+                <span>Under</span>
+              </div>
+            </div>
+          )}
+          {game.overMoneyPct !== null && game.underMoneyPct !== null && (game.overMoneyPct > 0 || game.underMoneyPct > 0) && (
+            <div style={{ marginTop: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b', fontWeight: 800, marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span>O/U Money</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, minWidth: '32px', textAlign: 'right' }}>{game.overMoneyPct}%</div>
+                <div style={{ flex: 1, display: 'flex', height: '6px', borderRadius: '3px', overflow: 'hidden', background: '#1e293b' }}>
+                  <div style={{ width: `${game.overMoneyPct}%`, background: '#22c55e', transition: 'width 0.3s' }} />
+                  <div style={{ width: `${game.underMoneyPct}%`, background: '#ef4444', transition: 'width 0.3s' }} />
+                </div>
+                <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 800, minWidth: '32px' }}>{game.underMoneyPct}%</div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#64748b', fontWeight: 700, marginTop: '1px' }}>
+                <span>Over</span>
+                <span>Under</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

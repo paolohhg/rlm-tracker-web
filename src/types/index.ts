@@ -40,6 +40,20 @@ export interface GameView {
   hsaSignalAction: string | null
   openingTotal: number | null
   currentTotal: number | null
+  totalMove: number | null
+  highestTotalSeen: number | null
+  lowestTotalSeen: number | null
+
+  // Totals splits
+  overTicketPct: number | null
+  underTicketPct: number | null
+  overMoneyPct: number | null
+  underMoneyPct: number | null
+
+  // Totals signal
+  totalSignalType: string | null
+  totalVelocityPerHour: number | null
+
   isLocked: boolean
   lastUpdated: string
 }
