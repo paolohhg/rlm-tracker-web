@@ -1,7 +1,107 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
-import { HSA_SYSTEM_PROMPT, buildHsaUserMessage } from './lib/hsa-prompt';
+
+// ── HSA System Prompt (inlined to avoid Vercel bundler issues) ────
+
+const HSA_SYSTEM_PROMPT = `You are the Heard Sports Analysis (HSA) engine used by Heard Sports Intelligence.
+Your role is to interpret sportsbook market behavior and produce professional market intelligence.
+You are NOT a handicapper, pick service, betting advisor, or gambling recommendation engine.
+Your analysis explains how sportsbooks are reacting to betting activity.
+You never recommend placing a wager.
+You never provide a "pick".
+You never instruct users to act on a signal.
+The analysis must read like professional trading desk market commentary.
+
+PRIMARY PURPOSE
+Analyze sportsbook market behavior using:
+Opening line vs current line, Line movement direction, Line movement velocity, Disagreement between sportsbooks, Coordination across sportsbooks, Betting ticket percentages, Betting money percentages, Reverse line movement, Steam moves, Market pressure, Timing of movement, Totals movement.
+
+Your job is to interpret what sportsbooks appear to be reacting to.
+Do NOT predict game outcomes.
+Do NOT speculate about team performance.
+Focus on market behavior only.
+
+STRICT LANGUAGE RULES
+Never use: pick, best bet, lock, play, hammer, must bet, take this team, bet this, wager, recommend, betting, correlated play, betting opportunity
+Never instruct the user to act.
+Never use directive language.
+Never say things like: "follow the signal", "bettors should take", "you should bet", "this is a play"
+Instead describe the market using neutral analysis language.
+
+APPROVED TERMINOLOGY
+Use professional market language:
+Market Lean, Market Bias, Pressure Direction, Signal Strength, Book Alignment, Sharp Indication, Market Efficiency, Price Discovery, Steam Move, Reverse Line Movement, PASS, WATCH, ACTIVE
+
+Market Lean is NOT a betting recommendation.
+Market Lean simply describes the direction sportsbooks appear to be adjusting toward.
+
+STATUS TAGS
+Each analysis must include one of the following: PASS, WATCH, ACTIVE
+
+PASS - Market appears efficient with no meaningful signal.
+WATCH - Movement or pressure is developing but not confirmed.
+ACTIVE - Clear market signal detected from sportsbook behavior.
+
+PASS is a valuable outcome and should be used frequently when signals are weak or balanced.
+Do not force conviction.
+
+SIGNAL INTERPRETATION
+Reverse Line Movement - Public betting majority on one side while the line moves the opposite direction.
+Steam Move - Rapid coordinated movement across multiple sportsbooks in a short window.
+Book Coordination - Several sportsbooks adjusting together in the same direction.
+Market Pressure - Gradual movement over time suggesting sustained action entering the market.
+Price Discovery - Early disagreement between sportsbooks followed by convergence.
+
+CONFIDENCE SCALE
+Confidence reflects clarity of the market signal, NOT certainty of game outcome.
+Low, Moderate, High
+
+OUTPUT STRUCTURE
+Return analysis using the following structure. Do NOT use markdown formatting, asterisks, or bold. Use plain text only.
+
+Heard Sports Analysis
+[Matchup]
+[League] | [PASS / WATCH / ACTIVE]
+
+HSI SIGNAL SUMMARY
+Reverse Line Movement:
+Steam Move:
+Book Alignment:
+Public Bias:
+
+Market Lean:
+Confidence:
+
+1. Line Movement
+Describe the opening spread vs current spread, disagreement between sportsbooks, and how the line has moved across the market. Explain if the movement crossed key numbers or represents meaningful price discovery.
+
+2. Book Behavior
+Describe how sportsbooks reacted to market activity. Explain whether books appear to be respecting action, protecting positions, or aligning with market consensus.
+
+3. Public Positioning
+Interpret ticket percentage vs money percentage. Identify any divergence between recreational betting patterns and larger wagers.
+
+4. Money Pattern
+Describe movement velocity and timing. Explain whether the movement appears to be gradual market pressure or a sharp steam move.
+
+5. Market Lean
+Provide the directional interpretation of market behavior. Allowed outputs: Team name, Over, Under, PASS. Market Lean is descriptive only and is NOT a wagering instruction.
+
+6. Confirmation Factors
+List factors that would strengthen or weaken the current market interpretation. Examples: line moving further in current direction, line reversing direction, public percentages shifting significantly, additional steam moves.
+
+7. Totals Intel
+Analyze totals market behavior separately. If totals movement shows stronger signals than the spread, clearly state that.
+
+End with: Disclaimer: For research purposes only.
+
+FINAL GUIDELINES
+Never instruct the reader to place a bet.
+Never use the phrase "follow the signal".
+Never describe an analysis as a betting opportunity.
+Never use gambling tout language.
+Describe what the market is doing, not what someone should do.`;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -247,6 +347,93 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
   };
 }
 
+// ── HSA User Message Builder ──────────────────────────────────────
+
+function buildHsaUserMessage(
+  league: string,
+  awayTeam: string,
+  homeTeam: string,
+  gameTime: string,
+  summary: OddsSummary,
+  splits?: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null,
+  totalsSplits?: { overTicketPct: number; underTicketPct: number; overMoneyPct: number; underMoneyPct: number } | null,
+): string {
+  const timelineStr = summary.timeline
+    .map((t) => `${t.label}: spread ${t.consensusSpread} | total ${t.consensusTotal} [${t.books.map((b) => `${b.book}: ${b.spread}/${b.total}`).join(', ')}]`)
+    .join('\n');
+
+  const currentBooksStr = summary.current.books
+    .map((b) => `${b.book}: spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice}) | ML ${b.mlHome}/${b.mlAway}`)
+    .join('\n');
+
+  const openingBooksStr = summary.opening.books
+    .map((b) => `${b.book}: spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice}) | ML ${b.mlHome}/${b.mlAway}`)
+    .join('\n');
+
+  const homeFavored = summary.current.consensusSpread < 0;
+  const favoriteTeam = homeFavored ? homeTeam : awayTeam;
+  const underdogTeam = homeFavored ? awayTeam : homeTeam;
+  const currentAbsSpread = Math.abs(summary.current.consensusSpread);
+
+  return `Analyze this game's market behavior and return the HSA JSON output.
+
+GAME: ${awayTeam} @ ${homeTeam}
+LEAGUE: ${league}
+GAME TIME: ${gameTime}
+
+SPREAD CONVENTION: All spreads are from ${homeTeam} (HOME) perspective. Negative = ${homeTeam} favored.
+CURRENT MARKET: ${favoriteTeam} favored by ${currentAbsSpread}. ${underdogTeam} is the underdog at +${currentAbsSpread}.
+
+=== MARKET DATA ===
+Tracking: ${summary.snapshotCount} snapshots over ${summary.trackingHours} hours
+Books: ${summary.books.join(', ')}
+
+OPENING LINES:
+${openingBooksStr}
+Consensus: spread ${summary.opening.consensusSpread} | total ${summary.opening.consensusTotal}
+
+CURRENT LINES:
+${currentBooksStr}
+Consensus: spread ${summary.current.consensusSpread} | total ${summary.current.consensusTotal}
+
+MOVEMENT:
+Spread: ${summary.spreadMovement > 0 ? '+' : ''}${summary.spreadMovement} (${summary.spreadDirection})
+Total: ${summary.totalMovement > 0 ? '+' : ''}${summary.totalMovement} (${summary.totalDirection})
+Velocity: ${summary.velocityPerHour} pts/hr
+Max book disagreement: ${summary.maxBookDisagreement} pts
+
+SHARP INDICATORS:
+Steam move: ${summary.sharpIndicators.steamMove ? `YES - ${summary.sharpIndicators.steamDetail}` : 'No'}
+Frozen line: ${summary.sharpIndicators.frozenLine ? 'YES - line barely moved despite extended tracking' : 'No'}
+Crossed key number: ${summary.sharpIndicators.crossedKeyNumber ? 'YES' : 'No'}
+Key numbers nearby: ${summary.sharpIndicators.keyNumbersNear.length ? summary.sharpIndicators.keyNumbersNear.join(', ') : 'none'}
+
+TOTALS SHARP INDICATORS:
+Total steam move: ${summary.totalSharpIndicators.totalSteamMove ? `YES - ${summary.totalSharpIndicators.totalSteamDetail} (${summary.totalSharpIndicators.totalSteamDirection})` : 'No'}
+Frozen total: ${summary.totalSharpIndicators.frozenTotal ? 'YES - total barely moved despite extended tracking' : 'No'}
+Total velocity: ${summary.totalSharpIndicators.totalVelocityPerHour} pts/hr
+Total book disagreement: ${summary.totalSharpIndicators.totalBookDisagreement} pts
+Highest total seen: ${summary.totalSharpIndicators.highestTotalSeen} / Lowest: ${summary.totalSharpIndicators.lowestTotalSeen}
+${splits ? `
+=== BETTING SPLITS ===
+Total bets tracked: ${splits.numBets.toLocaleString()}
+Spread tickets: ${awayTeam} ${splits.awayBetsPct}% / ${homeTeam} ${splits.homeBetsPct}%
+Spread money: ${awayTeam} ${splits.awayMoneyPct}% / ${homeTeam} ${splits.homeMoneyPct}%
+${splits.awayBetsPct !== splits.awayMoneyPct ? `TICKET/MONEY DIVERGENCE: ${Math.abs(splits.awayBetsPct - splits.awayMoneyPct)}% gap on ${awayTeam} side` : 'Tickets and money aligned'}` : `
+=== BETTING SPLITS ===
+No betting splits data available for this game.`}
+${totalsSplits ? `
+=== TOTALS SPLITS ===
+Over tickets: ${totalsSplits.overTicketPct}% / Under tickets: ${totalsSplits.underTicketPct}%
+Over money: ${totalsSplits.overMoneyPct}% / Under money: ${totalsSplits.underMoneyPct}%
+${Math.abs(totalsSplits.overTicketPct - totalsSplits.overMoneyPct) >= 5 ? `TOTALS DIVERGENCE: ${Math.abs(totalsSplits.overTicketPct - totalsSplits.overMoneyPct)}% gap` : 'Totals tickets and money aligned'}` : `
+=== TOTALS SPLITS ===
+No totals splits data available for this game.`}
+
+=== LINE MOVEMENT TIMELINE ===
+${timelineStr}`;
+}
+
 // ── Vercel Handler ─────────────────────────────────────────────────
 
 const supabase = createClient(
@@ -362,49 +549,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Claude returned empty response' });
     }
 
-    // Parse JSON response — strip markdown fences if present
-    let hsaJson: any;
-    try {
-      const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      hsaJson = JSON.parse(cleaned);
-    } catch {
-      // Fallback: return raw text as legacy narrative format
-      console.warn('HSA response was not valid JSON, returning as narrative');
-      const { error: insertError } = await supabase.from('claude_analyses').insert({
-        league,
-        home_team,
-        away_team,
-        game_id: `${league}|${home_team}|${away_team}`,
-        analysis: rawText,
-      });
-      if (insertError) console.error('Insert error:', insertError.message);
+    // Parse structured text response — extract key fields
+    const narrative = rawText;
 
-      return res.status(200).json({
-        narrative: rawText,
-        cached: false,
-        snapshot_count: summary.snapshotCount,
-        tracking_hours: summary.trackingHours,
-      });
-    }
+    // Extract status tag from output
+    const statusMatch = narrative.match(/\b(PASS|WATCH|ACTIVE)\b/);
+    const statusTag = statusMatch?.[1] || 'WATCH';
 
-    // Extract structured fields from HSA JSON
-    const statusTag = hsaJson.status_tag || 'WATCH';
-    const marketLean = hsaJson.market_lean || 'PASS';
-    const confidence = hsaJson.confidence || 'Low';
+    // Extract market lean from "Market Lean:" line
+    const leanMatch = narrative.match(/Market Lean:\s*(.+)/i);
+    const marketLean = leanMatch?.[1]?.trim() || 'PASS';
+
+    // Extract confidence from "Confidence:" line
+    const confMatch = narrative.match(/Confidence:\s*(Low|Moderate|High)/i);
+    const confidence = confMatch?.[1] || 'Low';
 
     // Compute totals data
     const totalsOpen = summary.opening.consensusTotal;
     const totalsCurrent = summary.current.consensusTotal;
     const totalsMove = roundHalf(totalsCurrent - totalsOpen);
 
-    // Store structured JSON in claude_analyses
-    const analysisStr = JSON.stringify(hsaJson);
+    // Store in claude_analyses
     const { error: insertError } = await supabase.from('claude_analyses').insert({
       league,
       home_team,
       away_team,
       game_id: `${league}|${home_team}|${away_team}`,
-      analysis: analysisStr,
+      analysis: narrative,
     });
 
     if (insertError) {
@@ -412,8 +583,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return res.status(200).json({
-      narrative: analysisStr,
-      hsa: hsaJson,
+      narrative,
       cached: false,
       snapshot_count: summary.snapshotCount,
       tracking_hours: summary.trackingHours,
@@ -423,7 +593,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totals_open: totalsOpen,
       totals_current: totalsCurrent,
       totals_move: totalsMove,
-      totals_intel: hsaJson.totals_intel || null,
       input_tokens: response.usage?.input_tokens,
       output_tokens: response.usage?.output_tokens,
     });

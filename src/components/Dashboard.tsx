@@ -304,38 +304,11 @@ function TeamBadge({ league, teamName, ncaabLogos, size = 28 }: { league: string
   );
 }
 
-// ── HSA JSON type ────────────────────────────────────────────
-interface HsaJson {
-  game: string;
-  league: string;
-  status_tag: 'PASS' | 'WATCH' | 'ACTIVE';
-  market_lean: string;
-  confidence: 'Low' | 'Moderate' | 'High';
-  signal_summary: {
-    reverse_line_movement: string;
-    steam_move: string;
-    book_alignment: string;
-    public_bias: string;
-  };
-  line_movement: string;
-  book_behavior: string;
-  public_positioning: string;
-  money_pattern: string;
-  market_lean_reasoning: string;
-  confirmation_factors: string[];
-  totals_intel: string;
-  disclaimer: string;
-}
-
-function tryParseHsa(raw: string | null): HsaJson | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed.status_tag && parsed.signal_summary) return parsed;
-    return null;
-  } catch {
-    return null;
-  }
+// ── HSA Text Parsing Helpers ─────────────────────────────────
+function extractHsaField(text: string, field: string): string {
+  const re = new RegExp(`${field}:\\s*(.+)`, 'i');
+  const m = text.match(re);
+  return m?.[1]?.trim() || '';
 }
 
 const STATUS_TAG_COLORS: Record<string, { bg: string; text: string }> = {
@@ -366,28 +339,12 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
     if (result?.narrative) setLocalNarrative(result.narrative);
   }, [generate, game, localNarrative]);
 
-  const hsa = tryParseHsa(localNarrative);
-  const isLegacy = localNarrative && !hsa;
+  const narrative = localNarrative;
 
-  const sectionStyle: React.CSSProperties = {
-    marginBottom: '14px',
-  };
-  const sectionLabelStyle: React.CSSProperties = {
-    color: T.muted,
-    fontSize: '9px',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.1em',
-    fontFamily: T.font,
-    marginBottom: '4px',
-  };
-  const sectionTextStyle: React.CSSProperties = {
-    color: T.text,
-    fontSize: '13px',
-    lineHeight: 1.65,
-    fontWeight: 500,
-    fontFamily: T.font,
-  };
+  // Extract structured fields from narrative text for visual badges
+  const statusTag = narrative?.match(/\b(PASS|WATCH|ACTIVE)\b/)?.[1] || '';
+  const marketLean = narrative ? extractHsaField(narrative, 'Market Lean') : '';
+  const confidence = narrative ? extractHsaField(narrative, 'Confidence') : '';
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
@@ -405,133 +362,56 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
           <button onClick={onClose} style={{ background: T.hover, border: 'none', color: T.textSecondary, borderRadius: '999px', width: '28px', height: '28px', cursor: 'pointer', fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
         </div>
 
-        {hsa ? (
+        {narrative ? (
           <div>
-            {/* Status + Market Lean + Confidence row */}
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-              <div style={{
-                background: (STATUS_TAG_COLORS[hsa.status_tag] || STATUS_TAG_COLORS.WATCH).bg,
-                color: (STATUS_TAG_COLORS[hsa.status_tag] || STATUS_TAG_COLORS.WATCH).text,
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 800,
-                fontFamily: T.font,
-                letterSpacing: '0.06em',
-              }}>
-                {hsa.status_tag}
-              </div>
-              <div style={{
-                background: T.hover,
-                color: T.text,
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 700,
-                fontFamily: T.font,
-              }}>
-                {hsa.market_lean}
-              </div>
-              <div style={{
-                background: 'transparent',
-                border: `1px solid ${T.border}`,
-                color: CONFIDENCE_COLORS[hsa.confidence] || T.muted,
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                fontFamily: T.font,
-                letterSpacing: '0.04em',
-              }}>
-                {hsa.confidence} confidence
-              </div>
-            </div>
-
-            {/* Signal Summary grid */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: '8px',
-              marginBottom: '16px',
-              background: T.bg,
-              borderRadius: '8px',
-              padding: '12px',
-            }}>
-              {[
-                { label: 'Reverse Line Movement', value: hsa.signal_summary.reverse_line_movement },
-                { label: 'Steam Move', value: hsa.signal_summary.steam_move },
-                { label: 'Book Alignment', value: hsa.signal_summary.book_alignment },
-                { label: 'Public Bias', value: hsa.signal_summary.public_bias },
-              ].map((sig) => (
-                <div key={sig.label}>
-                  <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: T.font }}>{sig.label}</div>
-                  <div style={{ color: T.textSecondary, fontSize: '12px', fontWeight: 500, fontFamily: T.font, marginTop: '2px' }}>{sig.value || '—'}</div>
+            {/* Status + Market Lean + Confidence badges */}
+            {statusTag && (
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                <div style={{
+                  background: (STATUS_TAG_COLORS[statusTag] || STATUS_TAG_COLORS.WATCH).bg,
+                  color: (STATUS_TAG_COLORS[statusTag] || STATUS_TAG_COLORS.WATCH).text,
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  fontFamily: T.font,
+                  letterSpacing: '0.06em',
+                }}>
+                  {statusTag}
                 </div>
-              ))}
-            </div>
-
-            {/* Analysis sections */}
-            <div style={sectionStyle}>
-              <div style={sectionLabelStyle}>Line Movement</div>
-              <div style={sectionTextStyle}>{hsa.line_movement}</div>
-            </div>
-
-            <div style={sectionStyle}>
-              <div style={sectionLabelStyle}>Book Behavior</div>
-              <div style={sectionTextStyle}>{hsa.book_behavior}</div>
-            </div>
-
-            <div style={sectionStyle}>
-              <div style={sectionLabelStyle}>Public Positioning</div>
-              <div style={sectionTextStyle}>{hsa.public_positioning}</div>
-            </div>
-
-            <div style={sectionStyle}>
-              <div style={sectionLabelStyle}>Money Pattern</div>
-              <div style={sectionTextStyle}>{hsa.money_pattern}</div>
-            </div>
-
-            {/* Market Lean Reasoning — highlighted */}
-            <div style={{
-              background: T.bg,
-              border: `1px solid ${T.border}`,
-              borderRadius: '8px',
-              padding: '12px 14px',
-              marginBottom: '14px',
-            }}>
-              <div style={sectionLabelStyle}>Market Lean Reasoning</div>
-              <div style={{ ...sectionTextStyle, color: T.accent }}>{hsa.market_lean_reasoning}</div>
-            </div>
-
-            {/* Confirmation Factors */}
-            {hsa.confirmation_factors?.length > 0 && (
-              <div style={sectionStyle}>
-                <div style={sectionLabelStyle}>Confirmation Factors</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {hsa.confirmation_factors.map((f, i) => (
-                    <div key={i} style={{ color: T.textSecondary, fontSize: '12px', fontFamily: T.font, paddingLeft: '10px', borderLeft: `2px solid ${T.border}` }}>
-                      {f}
-                    </div>
-                  ))}
-                </div>
+                {marketLean && marketLean !== 'PASS' && (
+                  <div style={{
+                    background: T.hover,
+                    color: T.text,
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    fontFamily: T.font,
+                  }}>
+                    {marketLean}
+                  </div>
+                )}
+                {confidence && (
+                  <div style={{
+                    background: 'transparent',
+                    border: `1px solid ${T.border}`,
+                    color: CONFIDENCE_COLORS[confidence] || T.muted,
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    fontFamily: T.font,
+                    letterSpacing: '0.04em',
+                  }}>
+                    {confidence} confidence
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Totals Intel */}
-            <div style={sectionStyle}>
-              <div style={sectionLabelStyle}>Totals Intel</div>
-              <div style={sectionTextStyle}>{hsa.totals_intel}</div>
-            </div>
-
-            {error && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>{error}</div>}
-            <button onClick={() => handleGenerate(true)} disabled={loading} style={{ marginTop: '8px', background: 'transparent', border: `1px solid ${T.border}`, color: T.textSecondary, borderRadius: '6px', padding: '6px 14px', cursor: loading ? 'wait' : 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: T.font }}>
-              {loading ? 'Refreshing...' : 'Refresh Analysis'}
-            </button>
-          </div>
-        ) : isLegacy ? (
-          /* Legacy narrative fallback */
-          <div>
-            <div style={{ color: T.text, fontSize: '13px', lineHeight: 1.7, fontWeight: 500, fontFamily: T.font, whiteSpace: 'pre-wrap' }}>{localNarrative}</div>
+            {/* Full narrative */}
+            <div style={{ color: T.text, fontSize: '13px', lineHeight: 1.7, fontWeight: 500, fontFamily: T.font, whiteSpace: 'pre-wrap' }}>{narrative}</div>
             {error && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>{error}</div>}
             <button onClick={() => handleGenerate(true)} disabled={loading} style={{ marginTop: '12px', background: 'transparent', border: `1px solid ${T.border}`, color: T.textSecondary, borderRadius: '6px', padding: '6px 14px', cursor: loading ? 'wait' : 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: T.font }}>
               {loading ? 'Refreshing...' : 'Refresh Analysis'}
