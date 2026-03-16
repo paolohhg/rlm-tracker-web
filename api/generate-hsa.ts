@@ -65,13 +65,13 @@ Heard Sports Analysis
 [League] | [PASS / WATCH / ACTIVE]
 
 HSI SIGNAL SUMMARY
-Reverse Line Movement:
-Steam Move:
-Book Alignment:
-Public Bias:
+Reverse Line Movement: [Yes/No - if Yes, state which side the line moved TOWARD despite public on the other side, e.g. "Yes - line moved toward Warriors +7 despite 62% public on Celtics"]
+Steam Move: [Yes/No - if Yes, state the direction and magnitude, e.g. "Yes - 1.5-point move toward Under 218 in 20 minutes"]
+Book Alignment: [Describe book consensus or disagreement with specific direction, e.g. "All three books moved toward Hawks +3.5" or "DraftKings shading 1 point lower than FanDuel"]
+Public Bias: [State which side the public is on with ticket %, then state whether sharp money appears to be on the SAME or OPPOSITE side, e.g. "68% tickets on Celtics - sharp indicators point opposite toward Warriors"]
 
-Market Lean:
-Confidence:
+Market Lean: [Specific team + number or Over/Under + number, e.g. "Warriors +7.5" or "Under 218.5" or "PASS"]
+Confidence: [Low / Moderate / High]
 
 1. Line Movement
 Describe the opening spread vs current spread, disagreement between sportsbooks, and how the line has moved across the market. Explain if the movement crossed key numbers or represents meaningful price discovery.
