@@ -6,25 +6,37 @@ const SHARP_BOOKS = new Set(["pinnacle", "circa", "bookmaker", "heritage"]);
 
 // ── Leagues to track ─────────────────────────────────────────
 const LEAGUES = [
-  { key: "basketball_nba",    league: "NBA"  },
-  { key: "basketball_ncaab",  league: "NCAAB" },
-  { key: "baseball_mlb",      league: "MLB"  },
+  { key: "basketball_nba",          league: "NBA"   },
+  { key: "basketball_ncaab",        league: "NCAAB" },
+  { key: "basketball_ncaab_nit",    league: "NCAAB" }, // NIT Tournament
+  { key: "baseball_mlb",            league: "MLB"   },
 ];
 
 const BOOKMAKERS = "draftkings,fanduel,betmgm,pinnacle,williamhill_us,barstool,caesars,pointsbetus";
 
-// ── Smart polling: skip games too far out ────────────────────
-// Returns true if we should poll this game right now
-function shouldPoll(commenceTime: string): boolean {
+// ── Smart polling logic ──────────────────────────────────────
+// Controls how often we poll each game.
+// ALWAYS capture games regardless of distance — we need opening lines.
+// For games far out, we just poll less frequently to save API quota.
+function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
   const now = Date.now();
   const tip = new Date(commenceTime).getTime();
   const hoursUntil = (tip - now) / 3600000;
 
-  // Already started or within 12 hours → always poll
+  // Game already started or within 1 hour → always poll
+  if (hoursUntil <= 1) return true;
+
+  // Within 12 hours → always poll (lines moving fastest)
   if (hoursUntil <= 12) return true;
 
-  // More than 12 hours out → skip (reduces API usage ~75%)
-  return false;
+  // 12–48 hours out → poll every 30 min (handled by cron, just let it through)
+  if (hoursUntil <= 48) return true;
+
+  // More than 48 hours out → only capture if not yet seen (opening line capture)
+  // Once we have a snapshot, skip until within 48h
+  if (!alreadySeen) return true; // Always grab opening line first time
+
+  return false; // Already have opener, skip until closer
 }
 
 // ── Markets per league ────────────────────────────────────────
@@ -43,6 +55,15 @@ serve(async () => {
   const now = new Date().toISOString();
   let apiCalls = 0;
 
+  // Load set of game+bookmaker combos already seen (for opening line logic)
+  const { data: seenRows } = await supabase
+    .from("odds_snapshots")
+    .select("home_team, away_team, league")
+    .gte("fetched_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+  const seenGames = new Set<string>(
+    (seenRows ?? []).map((r: any) => `${r.league}|${r.home_team}|${r.away_team}`)
+  );
+
   for (const { key, league } of LEAGUES) {
     const markets = marketsForLeague(league);
     const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
@@ -59,9 +80,11 @@ serve(async () => {
 
     for (const game of games) {
       const commenceTime = game.commence_time as string;
+      const gameSeenKey = `${league}|${game.home_team}|${game.away_team}`;
+      const alreadySeen = seenGames.has(gameSeenKey);
 
-      // Smart polling — skip games too far out
-      if (!shouldPoll(commenceTime)) continue;
+      // Smart polling — always capture openers, throttle far-out games
+      if (!shouldPoll(commenceTime, alreadySeen)) continue;
 
       const bookmakers = (game.bookmakers as Record<string, unknown>[]) ?? [];
 
