@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { GameView, GameStatus, HsaStatus, SignalTier } from '../types';
+import { computeResistance } from '../lib/intelligence/resistance';
+import { computeFakeSteam } from '../lib/intelligence/fake-steam';
 
 function deriveFallbackStatus(gameTime: string): GameStatus {
   const now = Date.now();
@@ -386,6 +388,23 @@ export function useGamesFeed() {
         if (!analysisMap[key]) analysisMap[key] = a;
       }
 
+      // Build per-book lines map for Fake Steam — latest spread per bookmaker per game
+      const bookLinesMap: Record<string, number[]> = {};
+      const bookLatest: Record<string, Record<string, { spread: number; fetched_at: string }>> = {};
+      for (const o of odds) {
+        if (o.spread == null) continue;
+        const key = buildMatchKey(o.league, o.home_team, o.away_team);
+        if (!bookLatest[key]) bookLatest[key] = {};
+        const bk = o.bookmaker as string;
+        const prev = bookLatest[key][bk];
+        if (!prev || new Date(o.fetched_at).getTime() > new Date(prev.fetched_at).getTime()) {
+          bookLatest[key][bk] = { spread: o.spread as number, fetched_at: o.fetched_at as string };
+        }
+      }
+      for (const [key, books] of Object.entries(bookLatest)) {
+        bookLinesMap[key] = Object.values(books).map(b => b.spread);
+      }
+
       const uniqueTipoffs: any[] = [];
       const seenKeys = new Set<string>();
 
@@ -491,6 +510,24 @@ export function useGamesFeed() {
 
         const narrative = alert?.hsa_narrative ?? analysis?.analysis ?? analysis?.narrative ?? null;
 
+        // Consensus percentages for resistance computation
+        const consensusHomePct = split?.home_ticket_pct ?? (alert?.public_bets_pct ?? null);
+        const consensusAwayPct = split?.away_ticket_pct ?? (consensusHomePct != null ? 100 - consensusHomePct : null);
+
+        // Intelligence: Line Resistance
+        const resistanceResult = computeResistance({
+          openSpread: bestOdds.opening?.spread ?? null,
+          currentSpread: bestOdds.current?.spread ?? null,
+          consensusHomePct,
+          consensusAwayPct,
+          openTimestamp: bestOdds.opening?.fetched_at ?? null,
+        });
+
+        // Intelligence: Fake Steam V1
+        const fakeSteamResult = computeFakeSteam({
+          bookLines: bookLinesMap[fallbackKey] ?? [],
+        });
+
         // ESPN is the fastest source — prefer it over DB status
         // ESPN is authoritative. Without ESPN data, force final after 2h (games rarely exceed 2.5h).
         const status: GameStatus = espn
@@ -562,6 +599,19 @@ export function useGamesFeed() {
           underMoneyPct: split?.total_under_money_pct ?? null,
           totalSignalType: null,
           totalVelocityPerHour: null,
+          // Intelligence
+          isResistance: resistanceResult.isResistance,
+          resistanceScore: resistanceResult.resistanceScore,
+          resistanceReason: resistanceResult.resistanceReason,
+          isFakeSteam: fakeSteamResult.isFakeSteam,
+          fakeSteamScore: fakeSteamResult.fakeSteamScore,
+          fakeSteamReason: fakeSteamResult.fakeSteamReason,
+          followerCount: fakeSteamResult.followerCount,
+          confirmationRate: fakeSteamResult.confirmationRate,
+          marketRange: fakeSteamResult.marketRange,
+          medianLine: fakeSteamResult.medianLine,
+          outlierBookCount: fakeSteamResult.outlierBookCount,
+
           isLocked: t.is_locked ?? false,
           lastUpdated:
             alert?.detected_at ??

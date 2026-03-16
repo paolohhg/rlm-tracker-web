@@ -54,6 +54,21 @@ export interface GameView {
   totalSignalType: string | null
   totalVelocityPerHour: number | null
 
+  // Intelligence — Line Resistance
+  isResistance: boolean
+  resistanceScore: number
+  resistanceReason: string | null
+
+  // Intelligence — Fake Steam
+  isFakeSteam: boolean
+  fakeSteamScore: number
+  fakeSteamReason: string | null
+  followerCount: number | null
+  confirmationRate: number | null
+  marketRange: number | null
+  medianLine: number | null
+  outlierBookCount: number | null
+
   isLocked: boolean
   lastUpdated: string
 }
