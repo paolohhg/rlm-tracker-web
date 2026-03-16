@@ -12,7 +12,7 @@ const LEAGUES = [
   { key: "baseball_mlb",            league: "MLB"   },
 ];
 
-const BOOKMAKERS = "draftkings,fanduel,betmgm,pinnacle,williamhill_us,barstool,caesars,pointsbetus";
+const BOOKMAKERS = "draftkings,fanduel,betmgm,pinnacle,caesars,pointsbetus,espnbet";
 
 // ── Smart polling logic ──────────────────────────────────────
 // Controls how often we poll each game.
