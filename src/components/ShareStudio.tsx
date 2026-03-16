@@ -93,7 +93,21 @@ function ExportCard({ game, tab, alertOptions, signalOptions }: {
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <img src="/hsi-logo.jpg" alt="" style={{ width: '40px', height: '40px', borderRadius: '8px' }} />
+        <div style={{
+          width: '40px',
+          height: '40px',
+          borderRadius: '8px',
+          background: 'linear-gradient(135deg, #00e5ff, #0088aa)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontWeight: 900,
+          fontSize: '18px',
+          color: '#000',
+          fontFamily: T.font,
+        }}>
+          HSI
+        </div>
         <span style={{ color: T.muted, fontSize: '18px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
           Heard Sports Intelligence
         </span>
@@ -225,17 +239,55 @@ export function ShareStudio({ game, onClose }: ShareStudioProps) {
     }
   }, []);
 
-  // Export PNG
+  // Export PNG — uses a temporarily visible offscreen clone for reliable capture
   const handleExportPng = useCallback(async () => {
     if (!exportRef.current || exporting) return;
     setExporting(true);
     try {
-      const dataUrl = await toPng(exportRef.current, {
+      // Clone the export card into a temporary container that's visible but offscreen.
+      // html-to-image needs the element in the visible DOM with real dimensions.
+      const clone = exportRef.current.cloneNode(true) as HTMLElement;
+      clone.style.position = 'fixed';
+      clone.style.left = '0';
+      clone.style.top = '0';
+      clone.style.width = '1200px';
+      clone.style.height = '675px';
+      clone.style.zIndex = '99999';
+      clone.style.opacity = '0';
+      clone.style.pointerEvents = 'none';
+      document.body.appendChild(clone);
+
+      // Remove any cross-origin images that would taint the canvas
+      const imgs = clone.querySelectorAll('img');
+      imgs.forEach((img) => {
+        try {
+          // Convert same-origin images inline; remove others
+          img.crossOrigin = 'anonymous';
+        } catch {
+          img.remove();
+        }
+      });
+
+      // Small delay to let browser lay out the clone
+      await new Promise((r) => setTimeout(r, 50));
+
+      const dataUrl = await toPng(clone, {
         width: 1200,
         height: 675,
-        pixelRatio: 1,
+        pixelRatio: 2,
         cacheBust: true,
+        skipFonts: true,
+        filter: (node: HTMLElement) => {
+          // Skip problematic elements
+          if (node.tagName === 'IMG' && node.getAttribute('src')?.startsWith('http')) {
+            return false;
+          }
+          return true;
+        },
       });
+
+      document.body.removeChild(clone);
+
       const link = document.createElement('a');
       link.download = `hsi-${activeTab}-${game.awayTeam}-${game.homeTeam}.png`
         .replace(/\s+/g, '-')
@@ -585,14 +637,16 @@ export function ShareStudio({ game, onClose }: ShareStudioProps) {
         </div>
       </div>
 
-      {/* Hidden export container (offscreen) */}
+      {/* Hidden export container (offscreen, must have real dimensions for cloning) */}
       <div
         ref={exportRef}
         style={{
           position: 'fixed',
           left: '-9999px',
-          top: '-9999px',
-          zIndex: -1,
+          top: '0',
+          width: '1200px',
+          height: '675px',
+          overflow: 'hidden',
           pointerEvents: 'none',
         }}
       >
