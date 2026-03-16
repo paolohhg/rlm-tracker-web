@@ -68,7 +68,11 @@ HSI SIGNAL SUMMARY
 Reverse Line Movement: [Yes/No - if Yes, state which side the line moved TOWARD despite public on the other side, e.g. "Yes - line moved toward Warriors +7 despite 62% public on Celtics"]
 Steam Move: [Yes/No - if Yes, state the direction and magnitude, e.g. "Yes - 1.5-point move toward Under 218 in 20 minutes"]
 Book Alignment: [Describe book consensus or disagreement with specific direction, e.g. "All three books moved toward Hawks +3.5" or "DraftKings shading 1 point lower than FanDuel"]
-Public Bias: [State which side the public is on with ticket %, then state whether sharp money appears to be on the SAME or OPPOSITE side, e.g. "68% tickets on Celtics - sharp indicators point opposite toward Warriors"]
+Public Bias: [REQUIRED FORMAT - Two parts separated by a pipe. Part 1: State public side with ticket %. Part 2: State the SHARP SIDE explicitly. Examples:
+"Public: 68% tickets on Celtics | Sharp side: Warriors +7.5 (reverse line movement + money divergence)"
+"Public: 55% tickets on Hawks | Sharp side: No divergence detected - public and sharp aligned on Hawks"
+"Public: 51% tickets on Wizards, 55% money on Wizards | Sharp side: NEUTRAL - slim margins show no meaningful sharp/public split"
+You MUST always include "Sharp side:" followed by a specific team+number, "No divergence detected", or "NEUTRAL". Never leave the sharp side ambiguous.]
 
 Market Lean: [Specific team + number or Over/Under + number, e.g. "Warriors +7.5" or "Under 218.5" or "PASS"]
 Confidence: [Low / Moderate / High]
@@ -101,7 +105,9 @@ Never instruct the reader to place a bet.
 Never use the phrase "follow the signal".
 Never describe an analysis as a betting opportunity.
 Never use gambling tout language.
-Describe what the market is doing, not what someone should do.`;
+Describe what the market is doing, not what someone should do.
+The Public Bias field MUST always contain "Sharp side:" with an explicit conclusion. Vague descriptions of public percentages without a sharp-side verdict are not acceptable.
+The Market Lean field MUST always name a specific team + number, Over/Under + number, or PASS. Never leave it directionally ambiguous.`;
 
 // ── Types ──────────────────────────────────────────────────────────
 
