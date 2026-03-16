@@ -129,11 +129,9 @@ function normalizeTeamName(name: string | null | undefined): string {
 }
 
 function buildMatchKey(leagueOrSport: string, homeTeam: string, awayTeam: string): string {
-  return [
-    leagueOrSport.toLowerCase(),
-    normalizeTeamName(homeTeam),
-    normalizeTeamName(awayTeam),
-  ].join('|');
+  // Sort teams alphabetically so neutral-site games with swapped home/away still match
+  const teams = [normalizeTeamName(homeTeam), normalizeTeamName(awayTeam)].sort();
+  return [leagueOrSport.toLowerCase(), teams[0], teams[1]].join('|');
 }
 
 function hoursApart(a: string, b: string): number {
@@ -392,11 +390,12 @@ export function useGamesFeed() {
       const seenKeys = new Set<string>();
 
       for (const t of tipoffs) {
-        const dedupKey = t.game_id
-          ? String(t.game_id)
-          : buildMatchKey(t.league, t.home_team, t.away_team);
-        if (!seenKeys.has(dedupKey)) {
+        const matchKey = buildMatchKey(t.league, t.home_team, t.away_team);
+        const dedupKey = t.game_id ? String(t.game_id) : matchKey;
+        if (!seenKeys.has(dedupKey) && !seenKeys.has(matchKey)) {
           seenKeys.add(dedupKey);
+          // Also add matchKey so ESPN/odds entries with swapped home/away get deduped
+          seenKeys.add(matchKey);
           uniqueTipoffs.push(t);
         }
       }
