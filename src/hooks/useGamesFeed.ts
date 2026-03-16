@@ -198,7 +198,8 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
 
   const urls = [
     'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
-    'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50',
+    // No groups filter — includes regular season, conference tournaments, NIT, CBI, etc.
+    'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard',
   ];
 
   await Promise.all(urls.map(async (url) => {
@@ -326,6 +327,34 @@ export function useGamesFeed() {
         if (!seenKeys.has(dedupKey)) {
           seenKeys.add(dedupKey);
           uniqueTipoffs.push(t);
+        }
+      }
+
+      // Synthesize tipoff entries from odds_snapshots for games not in tipoff_snapshots
+      // (e.g. NIT, CBI, and other postseason games that The Odds API includes but the
+      // RLM detection service hasn't processed yet)
+      const oddsGames = new Map<string, any>();
+      for (const o of odds) {
+        const key = buildMatchKey(o.league, o.home_team, o.away_team);
+        if (!oddsGames.has(key)) {
+          oddsGames.set(key, o);
+        }
+      }
+      for (const [key, o] of oddsGames) {
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueTipoffs.push({
+            game_id: null,
+            league: o.league,
+            home_team: o.home_team,
+            away_team: o.away_team,
+            game_time: o.game_time,
+            signal_tier: null,
+            sharp_team: null,
+            scenario_key: null,
+            is_locked: false,
+            created_at: o.fetched_at,
+          });
         }
       }
 
