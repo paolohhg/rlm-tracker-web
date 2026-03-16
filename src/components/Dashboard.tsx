@@ -980,11 +980,19 @@ export function Dashboard() {
   }, []);
 
   const { logCycle } = useHMCycles();
+  const hasLiveGames = games.some(g => g.status === 'live');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('live');
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
   const [logCycleGame, setLogCycleGame] = useState<GameView | null>(null);
+
+  // Default to 'upcoming' when no live games
+  useEffect(() => {
+    if (!loading && !hasLiveGames && statusFilter === 'live') {
+      setStatusFilter('upcoming');
+    }
+  }, [loading, hasLiveGames, statusFilter]);
 
   const filteredGames = useMemo(() => {
     let result = [...games];

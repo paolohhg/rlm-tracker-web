@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { HMCycles } from './components/HMCycles';
 import { Heard2HTab } from './components/Heard2H/Heard2HTab';
-import TickerBar from './components/TickerBar';
 
 type Tab = 'dashboard' | 'cycles' | 'heard2h';
 
@@ -23,7 +22,6 @@ export default function App() {
 
   return (
     <div style={{ background: '#020617', minHeight: '100vh' }}>
-      <TickerBar />
       <div style={{ display: 'flex', gap: '8px', padding: '14px 20px 0', maxWidth: '1400px', margin: '0 auto' }}>
         <button style={tabStyle(tab === 'dashboard')} onClick={() => setTab('dashboard')}>
           📡 RLM Dashboard
