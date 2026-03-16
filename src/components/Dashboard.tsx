@@ -33,6 +33,37 @@ const BADGE_COLORS: Record<string, string> = {
 };
 
 type StatusFilter = 'all' | 'upcoming' | 'live' | 'final';
+type LeagueFilter = 'all' | 'NBA' | 'NCAAB';
+type TournamentFilter = 'all' | 'ncaa_tournament' | 'nit';
+type SignalFilter = 'all' | 'rlm' | 'steam' | 'freeze' | 'resistance' | 'fake_steam';
+type TimeFilter = 'all' | 'lt1h' | '1to3h' | 'gt3h';
+
+function isFrozenSignal(signalTier: string | null | undefined) {
+  return signalTier === 'FROZEN LINE';
+}
+
+function matchesSignalFilter(game: GameView, filter: SignalFilter): boolean {
+  switch (filter) {
+    case 'all': return true;
+    case 'rlm': return isRlmSignal(game.signalTier);
+    case 'steam': return isSteamSignal(game.signalTier);
+    case 'freeze': return isFrozenSignal(game.signalTier);
+    case 'resistance': return game.isResistance;
+    case 'fake_steam': return game.isFakeSteam;
+  }
+}
+
+function matchesTimeFilter(game: GameView, filter: TimeFilter): boolean {
+  if (filter === 'all') return true;
+  if (game.status !== 'upcoming') return false;
+  const m = game.timeToTipMinutes;
+  switch (filter) {
+    case 'lt1h': return m < 60;
+    case '1to3h': return m >= 60 && m < 180;
+    case 'gt3h': return m >= 180;
+    default: return true;
+  }
+}
 
 // ── Helpers ──────────────────────────────────────────────────
 function isAlertSignal(signalTier: string | null | undefined) {
@@ -718,6 +749,10 @@ export function Dashboard() {
   const { logCycle } = useHMCycles();
   const hasLiveGames = games.some((g) => g.status === 'live');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('live');
+  const [leagueFilter, setLeagueFilter] = useState<LeagueFilter>('all');
+  const [tournamentFilter, setTournamentFilter] = useState<TournamentFilter>('all');
+  const [signalFilter, setSignalFilter] = useState<SignalFilter>('all');
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
@@ -739,6 +774,10 @@ export function Dashboard() {
   const filteredGames = useMemo(() => {
     let result = [...games];
     if (statusFilter !== 'all') result = result.filter((g) => g.status === statusFilter);
+    if (leagueFilter !== 'all') result = result.filter((g) => g.league === leagueFilter);
+    if (tournamentFilter !== 'all') result = result.filter((g) => g.tournament === tournamentFilter);
+    if (signalFilter !== 'all') result = result.filter((g) => matchesSignalFilter(g, signalFilter));
+    if (timeFilter !== 'all') result = result.filter((g) => matchesTimeFilter(g, timeFilter));
     if (alertsOnly) result = result.filter((g) => isAlertSignal(g.signalTier));
     const q = search.trim().toLowerCase();
     if (q) result = result.filter((g) => g.homeTeam.toLowerCase().includes(q) || g.awayTeam.toLowerCase().includes(q) || g.league.toLowerCase().includes(q));
@@ -748,7 +787,7 @@ export function Dashboard() {
       return a.timeToTipMinutes - b.timeToTipMinutes;
     });
     return result;
-  }, [games, statusFilter, alertsOnly, search]);
+  }, [games, statusFilter, leagueFilter, tournamentFilter, signalFilter, timeFilter, alertsOnly, search]);
 
   // Summary counts
   const liveCount = games.filter((g) => g.status === 'live').length;
@@ -776,13 +815,25 @@ export function Dashboard() {
       <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '20px' }}>
 
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ margin: 0, color: T.text, fontSize: '26px', fontWeight: 800, fontFamily: T.font, letterSpacing: '-0.02em' }}>
-              <span style={{ color: T.accent }}>HEARD</span> MARKET TRACKER
-            </h1>
-            <div style={{ color: T.textSecondary, marginTop: '4px', fontSize: '13px', fontWeight: 500, fontFamily: T.font }}>
-              Live market movement intelligence
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <img
+              src="/hsi-header.jpg"
+              alt="Heard Sports Intelligence"
+              style={{ height: '44px', borderRadius: '6px', objectFit: 'contain' }}
+            />
+            <div style={{
+              height: '32px',
+              width: '1px',
+              background: T.border,
+            }} />
+            <div>
+              <div style={{ color: T.text, fontSize: '15px', fontWeight: 700, fontFamily: T.font, letterSpacing: '0.02em' }}>
+                MARKET TRACKER
+              </div>
+              <div style={{ color: T.textSecondary, fontSize: '11px', fontWeight: 500, fontFamily: T.font, letterSpacing: '0.04em' }}>
+                Live market movement intelligence
+              </div>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -828,39 +879,92 @@ export function Dashboard() {
           padding: '12px 16px',
           marginBottom: '16px',
           display: 'flex',
-          flexWrap: 'wrap',
+          flexDirection: 'column',
           gap: '10px',
-          alignItems: 'center',
         }}>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search team or league..."
-            style={{
-              background: T.bg,
-              border: `1px solid ${T.border}`,
-              color: T.text,
-              borderRadius: '6px',
-              padding: '8px 12px',
-              minWidth: '200px',
-              fontWeight: 500,
-              fontFamily: T.font,
-              fontSize: '13px',
-            }}
-          />
+          {/* Row 1: Search + Status + Alerts */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search team..."
+              style={{
+                background: T.bg,
+                border: `1px solid ${T.border}`,
+                color: T.text,
+                borderRadius: '6px',
+                padding: '8px 12px',
+                minWidth: '160px',
+                fontWeight: 500,
+                fontFamily: T.font,
+                fontSize: '13px',
+              }}
+            />
 
-          <div style={{ display: 'flex', gap: '4px' }}>
-            {(['upcoming', 'live', 'final', 'all'] as StatusFilter[]).map((sf) => (
-              <button key={sf} onClick={() => setStatusFilter(sf)} style={filterBtnStyle(statusFilter === sf)}>
-                {sf === 'all' ? 'All' : sf.charAt(0).toUpperCase() + sf.slice(1)}
-              </button>
-            ))}
+            <div style={{ display: 'flex', gap: '3px' }}>
+              {(['upcoming', 'live', 'final', 'all'] as StatusFilter[]).map((sf) => (
+                <button key={sf} onClick={() => setStatusFilter(sf)} style={filterBtnStyle(statusFilter === sf)}>
+                  {sf === 'all' ? 'All' : sf.charAt(0).toUpperCase() + sf.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', color: T.textSecondary, fontWeight: 600, fontSize: '12px', fontFamily: T.font, cursor: 'pointer' }}>
+              <input type="checkbox" checked={alertsOnly} onChange={(e) => setAlertsOnly(e.target.checked)} style={{ accentColor: T.accent }} />
+              Alerts only
+            </label>
           </div>
 
-          <label style={{ display: 'flex', gap: '6px', alignItems: 'center', color: T.textSecondary, fontWeight: 600, fontSize: '12px', fontFamily: T.font, cursor: 'pointer' }}>
-            <input type="checkbox" checked={alertsOnly} onChange={(e) => setAlertsOnly(e.target.checked)} style={{ accentColor: T.accent }} />
-            Alerts only
-          </label>
+          {/* Row 2: League + Tournament + Signal + Time */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+            {/* League */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>League</span>
+              {(['all', 'NBA', 'NCAAB'] as LeagueFilter[]).map((lf) => (
+                <button key={lf} onClick={() => { setLeagueFilter(lf); if (lf !== 'NCAAB') setTournamentFilter('all'); }} style={filterBtnStyle(leagueFilter === lf)}>
+                  {lf === 'all' ? 'All' : lf}
+                </button>
+              ))}
+            </div>
+
+            {/* Tournament — only when NCAAB selected */}
+            {leagueFilter === 'NCAAB' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>Tourney</span>
+                {([['all', 'All'], ['ncaa_tournament', 'NCAA'], ['nit', 'NIT']] as [TournamentFilter, string][]).map(([tf, label]) => (
+                  <button key={tf} onClick={() => setTournamentFilter(tf)} style={filterBtnStyle(tournamentFilter === tf)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Divider */}
+            <div style={{ width: '1px', height: '20px', background: T.border }} />
+
+            {/* Signal */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>Signal</span>
+              {([['all', 'All'], ['rlm', 'RLM'], ['steam', 'Steam'], ['freeze', 'Freeze'], ['resistance', 'Resist.'], ['fake_steam', 'Fake St.']] as [SignalFilter, string][]).map(([sf, label]) => (
+                <button key={sf} onClick={() => setSignalFilter(sf)} style={filterBtnStyle(signalFilter === sf)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Divider */}
+            <div style={{ width: '1px', height: '20px', background: T.border }} />
+
+            {/* Time to tip */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>Time</span>
+              {([['all', 'All'], ['lt1h', '<1h'], ['1to3h', '1-3h'], ['gt3h', '3h+']] as [TimeFilter, string][]).map(([tf, label]) => (
+                <button key={tf} onClick={() => setTimeFilter(tf)} style={filterBtnStyle(timeFilter === tf)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Main Content */}

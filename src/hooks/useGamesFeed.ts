@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { GameView, GameStatus, HsaStatus, SignalTier } from '../types';
+import type { GameView, GameStatus, HsaStatus, SignalTier, Tournament } from '../types';
 import { computeResistance } from '../lib/intelligence/resistance';
 import { computeFakeSteam } from '../lib/intelligence/fake-steam';
 
@@ -198,12 +198,30 @@ type EspnGameEntry = {
   awayTeam: string;
   gameTime: string;
   league: 'NBA' | 'NCAAB';
+  tournament: Tournament;
   status: string;
   homeScore: number;
   awayScore: number;
   period: number | null;
   clock: string | null;
 };
+
+function parseTournament(event: any, league: 'NBA' | 'NCAAB'): Tournament {
+  if (league === 'NBA') return null;
+  // ESPN exposes tournament info in notes and season type
+  const notes: string = (event.competitions?.[0]?.notes?.[0]?.headline ?? event.notes?.[0]?.headline ?? '').toLowerCase();
+  if (notes.includes('ncaa tournament') || notes.includes('march madness') || notes.includes('ncaa ')) return 'ncaa_tournament';
+  if (notes.includes('nit')) return 'nit';
+  // Also check season type — ESPN uses type 3 for postseason
+  const seasonType = event.season?.type ?? 0;
+  if (seasonType === 3) {
+    // Postseason but notes didn't specify — check group info
+    const groupName: string = (event.competitions?.[0]?.conference?.name ?? '').toLowerCase();
+    if (groupName.includes('nit')) return 'nit';
+    return 'ncaa_tournament';
+  }
+  return null;
+}
 
 function formatDateYMD(d: Date): string {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -249,6 +267,7 @@ async function fetchEspnGames(): Promise<EspnGameEntry[]> {
           awayTeam: away.team.displayName ?? away.team.shortDisplayName ?? '',
           gameTime: comp.date ?? event.date ?? '',
           league,
+          tournament: parseTournament(event, league),
           status: espnStatus,
           homeScore: parseInt(home.score ?? '0', 10),
           awayScore: parseInt(away.score ?? '0', 10),
@@ -447,6 +466,15 @@ export function useGamesFeed() {
         }
       }
 
+      // Build ESPN tournament map — matchKey → tournament type
+      const espnTournamentMap: Record<string, Tournament> = {};
+      for (const eg of espnGames) {
+        if (eg.tournament) {
+          const key = buildMatchKey(eg.league, eg.homeTeam, eg.awayTeam);
+          espnTournamentMap[key] = eg.tournament;
+        }
+      }
+
       // Synthesize tipoff entries from ESPN schedule for games not in DB
       // (catches NIT, CBI, and other tournaments before odds are published)
       for (const eg of espnGames) {
@@ -459,6 +487,7 @@ export function useGamesFeed() {
             home_team: eg.homeTeam,
             away_team: eg.awayTeam,
             game_time: eg.gameTime,
+            tournament: eg.tournament,
             signal_tier: null,
             sharp_team: null,
             scenario_key: null,
@@ -553,6 +582,7 @@ export function useGamesFeed() {
         return {
           id: t.game_id ? String(t.game_id) : buildMatchKey(t.league, t.home_team, t.away_team),
           league: t.league,
+          tournament: t.tournament ?? espnTournamentMap[fallbackKey] ?? null,
           awayTeam: t.away_team,
           homeTeam: t.home_team,
           gameTime: t.game_time,
