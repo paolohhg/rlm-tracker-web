@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
+import { HSA_SYSTEM_PROMPT, buildHsaUserMessage } from './lib/hsa-prompt';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -245,9 +246,6 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
     totalSharpIndicators: { totalSteamMove, totalSteamDetail, totalSteamDirection, frozenTotal, totalVelocityPerHour, highestTotalSeen, lowestTotalSeen, totalBookDisagreement },
   };
 }
-
-// ── HSA Prompt (imported from lib) ────────────────────────────────
-import { HSA_SYSTEM_PROMPT, buildHsaUserMessage } from './lib/hsa-prompt';
 
 // ── Vercel Handler ─────────────────────────────────────────────────
 
