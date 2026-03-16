@@ -2,35 +2,9 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useGamesFeed } from '../hooks/useGamesFeed';
 import { useGenerateHsa } from '../hooks/useGenerateHsa';
 import { useHMCycles } from '../hooks/useHMCycles';
+import { ShareStudio } from './ShareStudio';
+import { T, BADGE_COLORS, STATUS_TAG_COLORS, CONFIDENCE_COLORS } from '../lib/theme';
 import type { GameView } from '../types';
-
-// ── Theme Constants ──────────────────────────────────────────
-const T = {
-  bg: '#0b0f19',
-  panel: '#141a2a',
-  hover: '#1a2133',
-  border: '#1f2636',
-  accent: '#00e5ff',
-  text: '#e6edf7',
-  textSecondary: '#94a3b8',
-  muted: '#64748b',
-  font: 'Inter, "Segoe UI", Arial, sans-serif',
-} as const;
-
-const BADGE_COLORS: Record<string, string> = {
-  'DOUBLE NO-NARRATIVE RLM': '#00ff9c',
-  'NO-NARRATIVE RLM': '#00ff9c',
-  RLM: '#00ff9c',
-  'STEAM MOVE': '#ff9f1c',
-  STEAM: '#ff9f1c',
-  'FROZEN LINE': '#a855f7',
-  FREEZE: '#a855f7',
-  'BOOK SHADE': '#ff4d4d',
-  'CONTRA MOVE': '#ff4d4d',
-  ALERT: '#ff4d4d',
-  RESISTANCE: '#38bdf8',
-  'FAKE STEAM': '#facc15',
-};
 
 type StatusFilter = 'all' | 'upcoming' | 'live' | 'final';
 type LeagueFilter = 'all' | 'NBA' | 'NCAAB';
@@ -311,18 +285,6 @@ function extractHsaField(text: string, field: string): string {
   return m?.[1]?.trim() || '';
 }
 
-const STATUS_TAG_COLORS: Record<string, { bg: string; text: string }> = {
-  PASS: { bg: '#1a2e1a', text: '#4ade80' },
-  WATCH: { bg: '#2e2a1a', text: '#facc15' },
-  ACTIVE: { bg: '#1a1a2e', text: '#00e5ff' },
-};
-
-const CONFIDENCE_COLORS: Record<string, string> = {
-  Low: '#64748b',
-  Moderate: '#facc15',
-  High: '#00e5ff',
-};
-
 // ── HSA Modal ────────────────────────────────────────────────
 function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () => void; onRefresh: () => void }) {
   const [localNarrative, setLocalNarrative] = useState<string | null>(game.hsaNarrative);
@@ -562,7 +524,7 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
 }
 
 // ── Desktop Table Row ────────────────────────────────────────
-function GameTableRow({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void }) {
+function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void }) {
   const [hovered, setHovered] = useState(false);
 
   const spreadDisplay = () => {
@@ -667,19 +629,40 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa }: { game: GameView; ncaabLo
           </div>
         )}
       </td>
+
+      {/* SHARE */}
+      <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); onShare(game); }}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${T.border}`,
+            color: T.textSecondary,
+            borderRadius: '6px',
+            padding: '5px 10px',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: '11px',
+            fontFamily: T.font,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Share
+        </button>
+      </td>
     </tr>
   );
 }
 
 // ── Desktop Table ────────────────────────────────────────────
-function GameTable({ games, ncaabLogos, onOpenHsa }: { games: GameView[]; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void }) {
+function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[]; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void }) {
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: T.font }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-            {['GAME', 'SPREAD', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', 'TIME'].map((col) => (
-              <th key={col} style={{
+            {['GAME', 'SPREAD', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', 'TIME', ''].map((col, i) => (
+              <th key={col || `empty-${i}`} style={{
                 padding: '10px 8px',
                 textAlign: col === 'GAME' ? 'left' : col === 'TIME' ? 'right' : 'center',
                 color: T.muted,
@@ -696,7 +679,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa }: { games: GameView[]; ncaabL
         </thead>
         <tbody>
           {games.map((game) => (
-            <GameTableRow key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={onOpenHsa} />
+            <GameTableRow key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={onOpenHsa} onShare={onShare} />
           ))}
         </tbody>
       </table>
@@ -705,7 +688,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa }: { games: GameView[]; ncaabL
 }
 
 // ── Mobile Card ──────────────────────────────────────────────
-function MobileGameCard({ game, ncaabLogos, onOpenHsa, onLogCycle }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onLogCycle: (game: GameView) => void }) {
+function MobileGameCard({ game, ncaabLogos, onOpenHsa, onLogCycle, onShare }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onLogCycle: (game: GameView) => void; onShare: (game: GameView) => void }) {
   return (
     <div
       onClick={() => onOpenHsa(game)}
@@ -807,6 +790,22 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onLogCycle }: { game: Gam
         >
           + Log Cycle
         </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onShare(game); }}
+          style={{
+            background: 'transparent',
+            border: `1px solid rgba(0, 229, 255, 0.3)`,
+            color: T.accent,
+            borderRadius: '6px',
+            padding: '6px 10px',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: '11px',
+            fontFamily: T.font,
+          }}
+        >
+          Share
+        </button>
       </div>
     </div>
   );
@@ -832,6 +831,7 @@ export function Dashboard() {
   const [search, setSearch] = useState('');
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
   const [logCycleGame, setLogCycleGame] = useState<GameView | null>(null);
+  const [shareStudioGame, setShareStudioGame] = useState<GameView | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
@@ -1054,18 +1054,19 @@ export function Dashboard() {
         ) : isMobile ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {filteredGames.map((game) => (
-              <MobileGameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onLogCycle={setLogCycleGame} />
+              <MobileGameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onLogCycle={setLogCycleGame} onShare={setShareStudioGame} />
             ))}
           </div>
         ) : (
           <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: '10px', overflow: 'hidden' }}>
-            <GameTable games={filteredGames} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} />
+            <GameTable games={filteredGames} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onShare={setShareStudioGame} />
           </div>
         )}
       </div>
 
       {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={refresh} />}
       {logCycleGame && <LogCycleModal game={logCycleGame} onClose={() => setLogCycleGame(null)} onLog={logCycle} />}
+      {shareStudioGame && <ShareStudio game={shareStudioGame} onClose={() => setShareStudioGame(null)} />}
     </div>
   );
 }
