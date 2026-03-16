@@ -102,12 +102,12 @@ export function AnalysisResult({ result, onSave }: Props) {
         </div>
       </div>
 
-      {/* MIP Scores */}
+      {/* Mispricing Scores */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-        {/* Totals MIP */}
+        {/* Totals Mispricing */}
         <div style={{ background: '#111827', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.08)', padding: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <SectionLabel text="Totals MIP" />
+            <SectionLabel text="Totals Mispricing" />
             <Badge color={verdictColor(mip.totals.verdict)} label={`${mip.totals.score}/8 ${verdictLabel(mip.totals.verdict)}`} />
           </div>
           {mip.totals.breakdown.map((line, i) => (
@@ -122,10 +122,10 @@ export function AnalysisResult({ result, onSave }: Props) {
           )}
         </div>
 
-        {/* Sides MIP */}
+        {/* Sides Mispricing */}
         <div style={{ background: '#111827', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.08)', padding: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <SectionLabel text="Sides MIP" />
+            <SectionLabel text="Sides Mispricing" />
             <Badge color={verdictColor(mip.sides.verdict)} label={`${mip.sides.score}/8 ${verdictLabel(mip.sides.verdict)}`} />
           </div>
           {mip.sides.breakdown.map((line, i) => (

@@ -46,7 +46,7 @@ export function Heard2HTab() {
             2H Analysis
           </h2>
           <div style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 700, marginTop: '4px' }}>
-            Halftime mispricing detection — MIP + Tempo + Signals
+            Halftime mispricing detection engine
           </div>
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>

@@ -248,7 +248,7 @@ export function AnalysisForm({ onResult }: Props) {
       </div>
 
       {/* MIP Confirmation Checkboxes */}
-      <div style={{ ...labelStyle, marginBottom: '8px' }}>MIP Confirmations</div>
+      <div style={{ ...labelStyle, marginBottom: '8px' }}>Confirmation Signals</div>
       <div style={{ background: '#020617', borderRadius: '10px', padding: '10px 14px', marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <div style={{ ...labelStyle, color: '#64748b', fontSize: '9px' }}>Totals</div>
         <label style={checkboxRowStyle}>

@@ -70,7 +70,7 @@ export function Analytics({ analytics }: Props) {
       <div style={{ color: '#f8fafc', fontWeight: 900, fontSize: '14px', fontFamily: FONT }}>
         {analytics.total_games} games logged &bull; {analytics.decided_games} decided
       </div>
-      <WinRateTable title="By MIP Tier" rows={analytics.by_mip_tier} />
+      <WinRateTable title="By Mispricing Tier" rows={analytics.by_mip_tier} />
       <WinRateTable title="By Edge Band" rows={analytics.by_edge_band} />
       <WinRateTable title="By Sport" rows={analytics.by_sport} />
       <WinRateTable title="By Signal" rows={analytics.by_signal} />

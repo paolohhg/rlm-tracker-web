@@ -109,13 +109,13 @@ export function GameLog({ games, loading, onUpdate }: Props) {
             {/* Stats row */}
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <div style={{ background: '#020617', borderRadius: '8px', padding: '6px 10px' }}>
-                <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 800, fontFamily: FONT }}>TOTALS MIP</div>
+                <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 800, fontFamily: FONT }}>TOTALS</div>
                 <div style={{ color: verdictColor(totVerdict), fontWeight: 900, fontSize: '13px', fontFamily: FONT }}>
                   {g.result.mip.totals.score}/8
                 </div>
               </div>
               <div style={{ background: '#020617', borderRadius: '8px', padding: '6px 10px' }}>
-                <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 800, fontFamily: FONT }}>SIDES MIP</div>
+                <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 800, fontFamily: FONT }}>SIDES</div>
                 <div style={{ color: verdictColor(sideVerdict), fontWeight: 900, fontSize: '13px', fontFamily: FONT }}>
                   {g.result.mip.sides.score}/8
                 </div>
