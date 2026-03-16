@@ -86,13 +86,13 @@ Interpret ticket percentage vs money percentage. Identify any divergence between
 Describe movement velocity and timing. Explain whether the movement appears to be gradual market pressure or a sharp steam move.
 
 5. Market Lean
-Provide the directional interpretation of market behavior. Allowed outputs: Team name, Over, Under, PASS. Market Lean is descriptive only and is NOT a wagering instruction.
+State clearly which side the market pressure is pointing toward, including the specific team name and current number (e.g. "Market pressure points toward Team +7.5" or "Sportsbook adjustments lean toward the Under 218.5"). If the market shows no directional lean, state "PASS - market appears efficiently priced with no exploitable signal." This is a description of where sportsbooks are adjusting, NOT a wagering instruction.
 
 6. Confirmation Factors
 List factors that would strengthen or weaken the current market interpretation. Examples: line moving further in current direction, line reversing direction, public percentages shifting significantly, additional steam moves.
 
 7. Totals Intel
-Analyze totals market behavior separately. If totals movement shows stronger signals than the spread, clearly state that.
+Analyze totals market behavior separately. State the specific total number and whether sportsbook behavior leans Over or Under, with confidence level (Low / Moderate / High). If totals movement shows stronger signals than the spread, clearly state that. If no totals signal exists, say PASS.
 
 End with: Disclaimer: For research purposes only.
 
@@ -375,7 +375,7 @@ function buildHsaUserMessage(
   const underdogTeam = homeFavored ? awayTeam : homeTeam;
   const currentAbsSpread = Math.abs(summary.current.consensusSpread);
 
-  return `Analyze this game's market behavior and return the HSA JSON output.
+  return `Analyze this game's market behavior and return the HSA structured analysis.
 
 GAME: ${awayTeam} @ ${homeTeam}
 LEAGUE: ${league}
