@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useGamesFeed } from '../hooks/useGamesFeed';
 import { useGenerateHsa } from '../hooks/useGenerateHsa';
-import { useHMCycles } from '../hooks/useHMCycles';
+// useHMCycles import removed — HM Cycles hidden for now
 import { ShareStudio } from './ShareStudio';
 import { T, BADGE_COLORS, STATUS_TAG_COLORS, CONFIDENCE_COLORS } from '../lib/theme';
 import type { GameView } from '../types';
@@ -417,101 +417,7 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
   );
 }
 
-// ── Log Cycle Modal ──────────────────────────────────────────
-function LogCycleModal({ game, onClose, onLog }: {
-  game: GameView;
-  onClose: () => void;
-  onLog: (params: { game_id: string; league: string; away_team: string; home_team: string; game_date: string; game_time: string; signal_tier?: string; sharp_side: string; sharp_spread: string; h1_units: number }) => Promise<unknown>;
-}) {
-  const [units, setUnits] = useState('1');
-  const [spread, setSpread] = useState(game.currentSpread !== null ? String(game.currentSpread) : '');
-  const [sharpSide, setSharpSide] = useState(game.sharpTeam || '');
-  const [saving, setSaving] = useState(false);
-
-  const handleLog = async () => {
-    if (!sharpSide || !spread) return;
-    setSaving(true);
-    try {
-      await onLog({
-        game_id: game.id,
-        league: game.league,
-        away_team: game.awayTeam,
-        home_team: game.homeTeam,
-        game_date: new Date(game.gameTime).toISOString().split('T')[0],
-        game_time: game.gameTime,
-        signal_tier: game.signalTier ?? undefined,
-        sharp_side: sharpSide,
-        sharp_spread: spread,
-        h1_units: parseFloat(units) || 1,
-      });
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const inputStyle: React.CSSProperties = {
-    background: T.bg,
-    border: `1px solid ${T.border}`,
-    color: T.text,
-    borderRadius: '6px',
-    padding: '8px 10px',
-    fontWeight: 500,
-    fontFamily: T.font,
-    fontSize: '13px',
-    width: '100%',
-    boxSizing: 'border-box',
-  };
-
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: '12px', padding: '24px', maxWidth: '400px', width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
-        <div style={{ color: T.text, fontWeight: 700, fontSize: '16px', fontFamily: T.font, marginBottom: '4px' }}>Log HM Cycle</div>
-        <div style={{ color: T.muted, fontSize: '12px', marginBottom: '20px', fontFamily: T.font }}>{game.awayTeam} @ {game.homeTeam} \u2022 {game.league}</div>
-
-        <div style={{ marginBottom: '14px' }}>
-          <div style={{ color: T.textSecondary, fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.08em', marginBottom: '6px', fontFamily: T.font }}>Sharp Side</div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {[game.awayTeam, game.homeTeam].map((team) => (
-              <button key={team} onClick={() => setSharpSide(team)} style={{
-                flex: 1,
-                background: sharpSide === team ? T.accent : T.bg,
-                border: `1px solid ${sharpSide === team ? T.accent : T.border}`,
-                color: sharpSide === team ? '#000' : T.textSecondary,
-                borderRadius: '6px',
-                padding: '8px 6px',
-                cursor: 'pointer',
-                fontWeight: 700,
-                fontSize: '11px',
-                fontFamily: T.font,
-              }}>
-                {team}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ marginBottom: '14px' }}>
-          <div style={{ color: T.textSecondary, fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.08em', marginBottom: '6px', fontFamily: T.font }}>Spread</div>
-          <input value={spread} onChange={(e) => setSpread(e.target.value)} placeholder="e.g. +4.5 or -7" style={inputStyle} />
-        </div>
-
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: T.textSecondary, fontSize: '10px', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.08em', marginBottom: '6px', fontFamily: T.font }}>1H Units</div>
-          <input value={units} onChange={(e) => setUnits(e.target.value)} placeholder="1" type="number" min="0.5" step="0.5" style={inputStyle} />
-          <div style={{ color: T.muted, fontSize: '11px', marginTop: '4px' }}>2H recovery = {((parseFloat(units) || 1) * 2).toFixed(1)} units (auto)</div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={onClose} style={{ flex: 1, background: 'transparent', border: `1px solid ${T.border}`, color: T.textSecondary, borderRadius: '6px', padding: '10px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', fontFamily: T.font }}>Cancel</button>
-          <button onClick={handleLog} disabled={!sharpSide || !spread || saving} style={{ flex: 2, background: T.accent, border: 'none', color: '#000', borderRadius: '6px', padding: '10px', cursor: 'pointer', fontWeight: 700, fontSize: '13px', fontFamily: T.font }}>
-            {saving ? 'Logging...' : 'Log Cycle'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ── Log Cycle Modal — HIDDEN (HM Cycles feature shelved) ────
 
 // ── Summary Card ─────────────────────────────────────────────
 function SummaryCard({ label, value, color }: { label: string; value: number; color?: string }) {
@@ -688,7 +594,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[
 }
 
 // ── Mobile Card ──────────────────────────────────────────────
-function MobileGameCard({ game, ncaabLogos, onOpenHsa, onLogCycle, onShare }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onLogCycle: (game: GameView) => void; onShare: (game: GameView) => void }) {
+function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void }) {
   return (
     <div
       onClick={() => onOpenHsa(game)}
@@ -775,22 +681,6 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onLogCycle, onShare }: { 
       {/* Actions */}
       <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
         <button
-          onClick={(e) => { e.stopPropagation(); onLogCycle(game); }}
-          style={{
-            background: 'transparent',
-            border: `1px solid rgba(168,139,250,0.3)`,
-            color: '#a78bfa',
-            borderRadius: '6px',
-            padding: '6px 10px',
-            cursor: 'pointer',
-            fontWeight: 600,
-            fontSize: '11px',
-            fontFamily: T.font,
-          }}
-        >
-          + Log Cycle
-        </button>
-        <button
           onClick={(e) => { e.stopPropagation(); onShare(game); }}
           style={{
             background: 'transparent',
@@ -820,7 +710,7 @@ export function Dashboard() {
     fetchNcaabLogoMap().then(setNcaabLogos);
   }, []);
 
-  const { logCycle } = useHMCycles();
+  // const { logCycle } = useHMCycles(); // HM Cycles hidden for now
   const hasLiveGames = games.some((g) => g.status === 'live');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('live');
   const [leagueFilter, setLeagueFilter] = useState<LeagueFilter>('all');
@@ -830,7 +720,7 @@ export function Dashboard() {
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
-  const [logCycleGame, setLogCycleGame] = useState<GameView | null>(null);
+  // const [logCycleGame, setLogCycleGame] = useState<GameView | null>(null); // HM Cycles hidden
   const [shareStudioGame, setShareStudioGame] = useState<GameView | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
@@ -991,9 +881,9 @@ export function Dashboard() {
           </div>
 
           {/* Row 2: League + Tournament + Signal + Time */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', overflow: 'hidden', width: '100%' }}>
             {/* League */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
               <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>League</span>
               {(['all', 'NBA', 'NCAAB'] as LeagueFilter[]).map((lf) => (
                 <button key={lf} onClick={() => { setLeagueFilter(lf); if (lf !== 'NCAAB') setTournamentFilter('all'); }} style={filterBtnStyle(leagueFilter === lf)}>
@@ -1018,7 +908,7 @@ export function Dashboard() {
             <div style={{ width: '1px', height: '20px', background: T.border }} />
 
             {/* Signal */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
               <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>Signal</span>
               {([['all', 'All'], ['rlm', 'RLM'], ['steam', 'Steam'], ['freeze', 'Freeze'], ['resistance', 'Resist.'], ['fake_steam', 'Fake St.']] as [SignalFilter, string][]).map(([sf, label]) => (
                 <button key={sf} onClick={() => setSignalFilter(sf)} style={filterBtnStyle(signalFilter === sf)}>
@@ -1031,7 +921,7 @@ export function Dashboard() {
             <div style={{ width: '1px', height: '20px', background: T.border }} />
 
             {/* Time to tip */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
               <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>Time</span>
               {([['all', 'All'], ['lt1h', '<1h'], ['1to3h', '1-3h'], ['gt3h', '3h+']] as [TimeFilter, string][]).map(([tf, label]) => (
                 <button key={tf} onClick={() => setTimeFilter(tf)} style={filterBtnStyle(timeFilter === tf)}>
@@ -1054,7 +944,7 @@ export function Dashboard() {
         ) : isMobile ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {filteredGames.map((game) => (
-              <MobileGameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onLogCycle={setLogCycleGame} onShare={setShareStudioGame} />
+              <MobileGameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onShare={setShareStudioGame} />
             ))}
           </div>
         ) : (
@@ -1065,7 +955,7 @@ export function Dashboard() {
       </div>
 
       {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={refresh} />}
-      {logCycleGame && <LogCycleModal game={logCycleGame} onClose={() => setLogCycleGame(null)} onLog={logCycle} />}
+      {/* logCycleGame modal removed — HM Cycles hidden for now */}
       {shareStudioGame && <ShareStudio game={shareStudioGame} onClose={() => setShareStudioGame(null)} />}
     </div>
   );

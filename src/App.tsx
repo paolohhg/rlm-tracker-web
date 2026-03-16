@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Dashboard } from './components/Dashboard';
-import { HMCycles } from './components/HMCycles';
 import { Heard2HTab } from './components/Heard2H/Heard2HTab';
 
-type Tab = 'dashboard' | 'cycles' | 'heard2h';
+type Tab = 'dashboard' | 'heard2h';
 
 const FONT = 'Inter, "Segoe UI", Arial, sans-serif';
 
@@ -57,9 +56,6 @@ export default function App() {
           <button style={tabStyle(tab === 'dashboard')} onClick={() => setTab('dashboard')}>
             Dashboard
           </button>
-          <button style={tabStyle(tab === 'cycles')} onClick={() => setTab('cycles')}>
-            HM Cycles
-          </button>
           <button style={tabStyle(tab === 'heard2h')} onClick={() => setTab('heard2h')}>
             2H Analysis
           </button>
@@ -67,7 +63,6 @@ export default function App() {
       </div>
 
       {tab === 'dashboard' && <Dashboard />}
-      {tab === 'cycles' && <HMCycles />}
       {tab === 'heard2h' && <Heard2HTab />}
     </div>
   );
