@@ -246,47 +246,28 @@ export function ShareStudio({ game, onClose }: ShareStudioProps) {
     try {
       // Clone the export card into a temporary container that's visible but offscreen.
       // html-to-image needs the element in the visible DOM with real dimensions.
-      const clone = exportRef.current.cloneNode(true) as HTMLElement;
-      clone.style.position = 'fixed';
-      clone.style.left = '0';
-      clone.style.top = '0';
-      clone.style.width = '1200px';
-      clone.style.height = '675px';
-      clone.style.zIndex = '99999';
-      clone.style.opacity = '0';
-      clone.style.pointerEvents = 'none';
-      document.body.appendChild(clone);
+      // Move the offscreen container into a visible (but user-hidden) position
+      // so html-to-image can capture it with full opacity.
+      // We position it behind the Share Studio drawer at z-index 0.
+      const el = exportRef.current;
+      const prevLeft = el.style.left;
+      el.style.left = '-2000px';
+      el.style.top = '0';
+      el.style.zIndex = '0';
 
-      // Remove any cross-origin images that would taint the canvas
-      const imgs = clone.querySelectorAll('img');
-      imgs.forEach((img) => {
-        try {
-          // Convert same-origin images inline; remove others
-          img.crossOrigin = 'anonymous';
-        } catch {
-          img.remove();
-        }
-      });
-
-      // Small delay to let browser lay out the clone
+      // Small delay to let browser lay out
       await new Promise((r) => setTimeout(r, 50));
 
-      const dataUrl = await toPng(clone, {
+      const dataUrl = await toPng(el, {
         width: 1200,
         height: 675,
         pixelRatio: 2,
         cacheBust: true,
         skipFonts: true,
-        filter: (node: HTMLElement) => {
-          // Skip problematic elements
-          if (node.tagName === 'IMG' && node.getAttribute('src')?.startsWith('http')) {
-            return false;
-          }
-          return true;
-        },
       });
 
-      document.body.removeChild(clone);
+      // Move it back offscreen
+      el.style.left = prevLeft;
 
       const link = document.createElement('a');
       link.download = `hsi-${activeTab}-${game.awayTeam}-${game.homeTeam}.png`
