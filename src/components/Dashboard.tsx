@@ -357,7 +357,7 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
               <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: T.font }}>Heard Sports Analysis</span>
             </div>
             <div style={{ color: T.text, fontWeight: 700, fontSize: '16px', marginTop: '6px', fontFamily: T.font }}>{game.awayTeam} @ {game.homeTeam}</div>
-            <div style={{ color: T.muted, fontSize: '12px', marginTop: '4px', fontFamily: T.font }}>{game.league} {game.signalTier && game.signalTier !== 'TRACKING' ? `\u2022 ${game.signalTier}` : ''}</div>
+            <div style={{ color: T.muted, fontSize: '12px', marginTop: '4px', fontFamily: T.font }}>{game.league} {game.signalTier && game.signalTier !== 'TRACKING' && game.signalTier !== 'WATCH' ? `\u2022 ${game.signalTier}` : ''}</div>
           </div>
           <button onClick={onClose} style={{ background: T.hover, border: 'none', color: T.textSecondary, borderRadius: '999px', width: '28px', height: '28px', cursor: 'pointer', fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
         </div>

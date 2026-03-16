@@ -120,6 +120,140 @@ interface OddsSnapshot {
   total: number;
   total_over_price: number;
   fetched_at: string;
+  // Fields from DB that may be present
+  league?: string;
+  game_time?: string;
+  home_team?: string;
+  away_team?: string;
+  book_type?: string;
+}
+
+// ── Canonical Market Classification ──────────────────────────────
+
+interface NormalizedOddsRow {
+  eventId: string;
+  sport: string;
+  book: string;
+  bookType: string;
+  marketType: 'spread' | 'total' | 'moneyline';
+  period: 'full_game' | 'first_half' | 'second_half' | 'live';
+  betType: 'main' | 'alternate' | 'team_total' | 'live';
+  side: 'home' | 'away' | 'over' | 'under' | null;
+  line: number | null;
+  price: number | null;
+  timestamp: string;
+  sourceLabel: string;
+  usable: boolean;
+  skipReason: string | null;
+  // Original raw row for reconstruction
+  raw: OddsSnapshot;
+}
+
+// League-specific sanity bounds for full-game totals
+const TOTAL_SANITY_BOUNDS: Record<string, { min: number; max: number }> = {
+  NBA:   { min: 180, max: 280 },
+  NCAAB: { min: 100, max: 220 },
+  MLB:   { min: 4, max: 16 },
+};
+
+// League-specific sanity bounds for full-game spreads
+const SPREAD_SANITY_BOUNDS: Record<string, { max: number }> = {
+  NBA:   { max: 30 },
+  NCAAB: { max: 40 },
+  MLB:   { max: 5 },
+};
+
+function classifyOddsRow(
+  row: OddsSnapshot,
+  league: string,
+  gameTime: string,
+): NormalizedOddsRow[] {
+  const eventId = `${league}|${row.home_team || ''}|${row.away_team || ''}|${gameTime}`;
+  const sport = league === 'MLB' ? 'baseball' : 'basketball';
+  const book = row.bookmaker;
+  const bookType = row.book_type || 'square';
+  const timestamp = row.fetched_at;
+
+  const results: NormalizedOddsRow[] = [];
+  const totalBounds = TOTAL_SANITY_BOUNDS[league] || { min: 50, max: 350 };
+  const spreadBounds = SPREAD_SANITY_BOUNDS[league] || { max: 50 };
+
+  // Classify spread market
+  if (row.spread != null && row.spread !== 0) {
+    const absSpread = Math.abs(row.spread);
+    let usable = true;
+    let skipReason: string | null = null;
+
+    if (absSpread > spreadBounds.max) {
+      usable = false;
+      skipReason = `spread ${row.spread} exceeds ${league} max ${spreadBounds.max}`;
+    }
+
+    results.push({
+      eventId, sport, book, bookType,
+      marketType: 'spread',
+      period: 'full_game',
+      betType: 'main',
+      side: 'home',
+      line: row.spread,
+      price: row.spread_home_price,
+      timestamp,
+      sourceLabel: `${book} spread ${row.spread}`,
+      usable,
+      skipReason,
+      raw: row,
+    });
+  }
+
+  // Classify total market
+  if (row.total != null && row.total !== 0) {
+    let usable = true;
+    let skipReason: string | null = null;
+
+    if (row.total < totalBounds.min || row.total > totalBounds.max) {
+      usable = false;
+      skipReason = `total ${row.total} outside ${league} bounds [${totalBounds.min}-${totalBounds.max}]`;
+    }
+
+    results.push({
+      eventId, sport, book, bookType,
+      marketType: 'total',
+      period: 'full_game',
+      betType: 'main',
+      side: 'over',
+      line: row.total,
+      price: row.total_over_price,
+      timestamp,
+      sourceLabel: `${book} total ${row.total}`,
+      usable,
+      skipReason,
+      raw: row,
+    });
+  }
+
+  // Classify moneyline market
+  if (row.moneyline_home != null && row.moneyline_home !== 0) {
+    results.push({
+      eventId, sport, book, bookType,
+      marketType: 'moneyline',
+      period: 'full_game',
+      betType: 'main',
+      side: 'home',
+      line: null,
+      price: row.moneyline_home,
+      timestamp,
+      sourceLabel: `${book} ML home ${row.moneyline_home}`,
+      usable: true,
+      skipReason: null,
+      raw: row,
+    });
+  }
+
+  return results;
+}
+
+function canonicalMarketKey(row: NormalizedOddsRow): string {
+  return `${row.eventId}|${row.book}|${row.marketType}|${row.period}|${row.betType}`;
 }
 
 interface BookLine {
@@ -343,6 +477,12 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
   const currentTotalsArr = currentBooks.map((b) => b.total).filter((t) => t > 0);
   const totalBookDisagreement = currentTotalsArr.length > 1 ? round1(Math.max(...currentTotalsArr) - Math.min(...currentTotalsArr)) : 0;
 
+  // Anomaly detection: flag suspiciously wide total ranges (possible data contamination)
+  const totalRange = highestTotalSeen - lowestTotalSeen;
+  if (totalRange > 15 && highestTotalSeen > 0 && lowestTotalSeen > 0) {
+    console.warn(`[HSA ANOMALY] Total range ${totalRange}pts (${lowestTotalSeen}–${highestTotalSeen}) — possible market contamination`);
+  }
+
   return {
     snapshotCount: snapshots.length, trackingHours, books,
     opening: { time: firstTime, books: openingBooks, consensusSpread: openingConsensusSpread, consensusTotal: openingConsensusTotal },
@@ -487,12 +627,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Fetch all odds snapshots for this game
+    // Fetch odds snapshots scoped to this specific game
+    // Filter by league + game_time window to prevent cross-game contamination
+    const gameTimeDate = new Date(game_time);
+    const windowStart = new Date(gameTimeDate.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const windowEnd = new Date(gameTimeDate.getTime() + 4 * 60 * 60 * 1000).toISOString();
+
     const { data: odds, error: oddsError } = await supabase
       .from('odds_snapshots')
       .select('*')
+      .eq('league', league)
       .eq('home_team', home_team)
       .eq('away_team', away_team)
+      .gte('game_time', windowStart)
+      .lte('game_time', windowEnd)
       .order('fetched_at', { ascending: true });
 
     if (oddsError) {
@@ -503,8 +651,79 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'No odds data found for this game' });
     }
 
-    // Preprocess odds into structured summary
-    const summary = summarizeOdds(odds, game_time);
+    // ── Canonical Market Classification ──────────────────────────
+    // Classify every raw row, validate against league bounds, filter to usable full-game main markets
+    const allClassified: NormalizedOddsRow[] = [];
+    for (const row of odds) {
+      allClassified.push(...classifyOddsRow(row as OddsSnapshot, league, game_time));
+    }
+
+    const usableRows = allClassified.filter(r => r.usable);
+    const skippedRows = allClassified.filter(r => !r.usable);
+
+    // Debug logging: show exactly what feeds into the analysis
+    console.log(`[HSA DEBUG] ${league} | ${away_team} @ ${home_team} | game_time=${game_time}`);
+    console.log(`[HSA DEBUG] Query window: ${windowStart} to ${windowEnd}`);
+    console.log(`[HSA DEBUG] Raw query rows: ${odds.length} | Classified: ${allClassified.length} | Usable: ${usableRows.length} | Skipped: ${skippedRows.length}`);
+
+    if (skippedRows.length > 0) {
+      for (const r of skippedRows) {
+        console.log(`[HSA SKIP] ${r.book} | ${r.marketType} | line=${r.line} | reason=${r.skipReason}`);
+      }
+    }
+
+    // Log data ranges for verification
+    const usableTotals = usableRows.filter(r => r.marketType === 'total').map(r => r.line!).filter(l => l > 0);
+    const usableSpreads = usableRows.filter(r => r.marketType === 'spread').map(r => r.line!).filter(l => l !== 0);
+    if (usableTotals.length > 0) {
+      console.log(`[HSA DEBUG] Total range: ${Math.min(...usableTotals)} to ${Math.max(...usableTotals)} (${usableTotals.length} rows)`);
+    }
+    if (usableSpreads.length > 0) {
+      console.log(`[HSA DEBUG] Spread range: ${Math.min(...usableSpreads)} to ${Math.max(...usableSpreads)} (${usableSpreads.length} rows)`);
+    }
+    const distinctGameTimes = [...new Set(odds.map((r: any) => r.game_time))];
+    if (distinctGameTimes.length > 1) {
+      console.warn(`[HSA WARNING] Multiple game_time values in results: ${distinctGameTimes.join(', ')}`);
+    }
+    const books = [...new Set(usableRows.map(r => r.book))];
+    console.log(`[HSA DEBUG] Books: ${books.join(', ')}`);
+
+    // Build clean OddsSnapshot array from usable full-game main rows only
+    // De-duplicate: one raw row produces spread+total+ML classifications,
+    // but summarizeOdds expects the original flat row format.
+    // Collect unique raw rows where at least one market is usable.
+    const usableRawRowSet = new Set<OddsSnapshot>();
+    for (const r of usableRows) {
+      if (r.period === 'full_game' && r.betType === 'main') {
+        usableRawRowSet.add(r.raw);
+      }
+    }
+
+    // For rows where total was flagged unusable but spread was fine,
+    // zero out the total so it doesn't contaminate the summarizer
+    const cleanSnapshots: OddsSnapshot[] = [...usableRawRowSet].map(raw => {
+      const totalClassified = allClassified.find(
+        c => c.raw === raw && c.marketType === 'total'
+      );
+      const spreadClassified = allClassified.find(
+        c => c.raw === raw && c.marketType === 'spread'
+      );
+
+      return {
+        ...raw,
+        total: (totalClassified && totalClassified.usable) ? raw.total : 0,
+        total_over_price: (totalClassified && totalClassified.usable) ? raw.total_over_price : 0,
+        spread: (spreadClassified && spreadClassified.usable) ? raw.spread : 0,
+        spread_home_price: (spreadClassified && spreadClassified.usable) ? raw.spread_home_price : 0,
+      };
+    });
+
+    if (!cleanSnapshots.length) {
+      return res.status(404).json({ error: 'No usable odds data after market classification' });
+    }
+
+    // Preprocess clean odds into structured summary
+    const summary = summarizeOdds(cleanSnapshots, game_time);
 
     // Fetch betting splits from splits_snapshots table
     let splitsData: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null = null;

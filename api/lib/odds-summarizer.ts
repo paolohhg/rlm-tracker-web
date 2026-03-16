@@ -1,3 +1,7 @@
+// NOTE: This is the reference copy of the odds summarizer.
+// The canonical copy used by the HSA pipeline is INLINED in api/generate-hsa.ts
+// due to Vercel bundler constraints. Keep both in sync when making changes.
+
 export interface OddsSnapshot {
   bookmaker: string;
   spread: number;
@@ -280,6 +284,12 @@ export function summarizeOdds(
     currentTotalsArr.length > 1
       ? round1(Math.max(...currentTotalsArr) - Math.min(...currentTotalsArr))
       : 0;
+
+  // Anomaly detection: flag suspiciously wide total ranges (possible data contamination)
+  const totalRange = highestTotalSeen - lowestTotalSeen;
+  if (totalRange > 15 && highestTotalSeen > 0 && lowestTotalSeen > 0) {
+    console.warn(`[HSA ANOMALY] Total range ${totalRange}pts (${lowestTotalSeen}–${highestTotalSeen}) — possible market contamination`);
+  }
 
   return {
     snapshotCount: snapshots.length,
