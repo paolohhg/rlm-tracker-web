@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { HMCycles } from './components/HMCycles';
+import { Heard2HTab } from './components/Heard2H/Heard2HTab';
 import TickerBar from './components/TickerBar';
 
-type Tab = 'dashboard' | 'cycles';
+type Tab = 'dashboard' | 'cycles' | 'heard2h';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard');
@@ -30,8 +31,13 @@ export default function App() {
         <button style={tabStyle(tab === 'cycles')} onClick={() => setTab('cycles')}>
           📋 HM Cycles
         </button>
+        <button style={tabStyle(tab === 'heard2h')} onClick={() => setTab('heard2h')}>
+          📊 2H Analysis
+        </button>
       </div>
-      {tab === 'dashboard' ? <Dashboard /> : <HMCycles />}
+      {tab === 'dashboard' && <Dashboard />}
+      {tab === 'cycles' && <HMCycles />}
+      {tab === 'heard2h' && <Heard2HTab />}
     </div>
   );
 }
