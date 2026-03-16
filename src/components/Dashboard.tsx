@@ -304,6 +304,52 @@ function TeamBadge({ league, teamName, ncaabLogos, size = 28 }: { league: string
   );
 }
 
+// ── HSA JSON type ────────────────────────────────────────────
+interface HsaJson {
+  game: string;
+  league: string;
+  status_tag: 'PASS' | 'WATCH' | 'ACTIVE';
+  market_lean: string;
+  confidence: 'Low' | 'Moderate' | 'High';
+  signal_summary: {
+    reverse_line_movement: string;
+    steam_move: string;
+    book_alignment: string;
+    public_bias: string;
+  };
+  line_movement: string;
+  book_behavior: string;
+  public_positioning: string;
+  money_pattern: string;
+  market_lean_reasoning: string;
+  confirmation_factors: string[];
+  totals_intel: string;
+  disclaimer: string;
+}
+
+function tryParseHsa(raw: string | null): HsaJson | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed.status_tag && parsed.signal_summary) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const STATUS_TAG_COLORS: Record<string, { bg: string; text: string }> = {
+  PASS: { bg: '#1a2e1a', text: '#4ade80' },
+  WATCH: { bg: '#2e2a1a', text: '#facc15' },
+  ACTIVE: { bg: '#1a1a2e', text: '#00e5ff' },
+};
+
+const CONFIDENCE_COLORS: Record<string, string> = {
+  Low: '#64748b',
+  Moderate: '#facc15',
+  High: '#00e5ff',
+};
+
 // ── HSA Modal ────────────────────────────────────────────────
 function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () => void; onRefresh: () => void }) {
   const [localNarrative, setLocalNarrative] = useState<string | null>(game.hsaNarrative);
@@ -320,23 +366,172 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
     if (result?.narrative) setLocalNarrative(result.narrative);
   }, [generate, game, localNarrative]);
 
-  const narrative = localNarrative;
+  const hsa = tryParseHsa(localNarrative);
+  const isLegacy = localNarrative && !hsa;
+
+  const sectionStyle: React.CSSProperties = {
+    marginBottom: '14px',
+  };
+  const sectionLabelStyle: React.CSSProperties = {
+    color: T.muted,
+    fontSize: '9px',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    fontFamily: T.font,
+    marginBottom: '4px',
+  };
+  const sectionTextStyle: React.CSSProperties = {
+    color: T.text,
+    fontSize: '13px',
+    lineHeight: 1.65,
+    fontWeight: 500,
+    fontFamily: T.font,
+  };
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: '12px', padding: '24px', maxWidth: '600px', width: '100%', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: '12px', padding: '24px', maxWidth: '640px', width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+        {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
           <div>
-            <div style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: T.font }}>Heard Sports Analysis</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <img src="/hsi-logo.jpg" alt="" style={{ height: '20px', width: '20px', borderRadius: '4px' }} />
+              <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: T.font }}>Heard Sports Analysis</span>
+            </div>
             <div style={{ color: T.text, fontWeight: 700, fontSize: '16px', marginTop: '6px', fontFamily: T.font }}>{game.awayTeam} @ {game.homeTeam}</div>
             <div style={{ color: T.muted, fontSize: '12px', marginTop: '4px', fontFamily: T.font }}>{game.league} {game.signalTier && game.signalTier !== 'TRACKING' ? `\u2022 ${game.signalTier}` : ''}</div>
           </div>
           <button onClick={onClose} style={{ background: T.hover, border: 'none', color: T.textSecondary, borderRadius: '999px', width: '28px', height: '28px', cursor: 'pointer', fontWeight: 700, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>✕</button>
         </div>
 
-        {narrative ? (
+        {hsa ? (
           <div>
-            <div style={{ color: T.text, fontSize: '13px', lineHeight: 1.7, fontWeight: 500, fontFamily: T.font, whiteSpace: 'pre-wrap' }}>{narrative}</div>
+            {/* Status + Market Lean + Confidence row */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+              <div style={{
+                background: (STATUS_TAG_COLORS[hsa.status_tag] || STATUS_TAG_COLORS.WATCH).bg,
+                color: (STATUS_TAG_COLORS[hsa.status_tag] || STATUS_TAG_COLORS.WATCH).text,
+                padding: '6px 14px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 800,
+                fontFamily: T.font,
+                letterSpacing: '0.06em',
+              }}>
+                {hsa.status_tag}
+              </div>
+              <div style={{
+                background: T.hover,
+                color: T.text,
+                padding: '6px 14px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 700,
+                fontFamily: T.font,
+              }}>
+                {hsa.market_lean}
+              </div>
+              <div style={{
+                background: 'transparent',
+                border: `1px solid ${T.border}`,
+                color: CONFIDENCE_COLORS[hsa.confidence] || T.muted,
+                padding: '6px 14px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                fontFamily: T.font,
+                letterSpacing: '0.04em',
+              }}>
+                {hsa.confidence} confidence
+              </div>
+            </div>
+
+            {/* Signal Summary grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: '8px',
+              marginBottom: '16px',
+              background: T.bg,
+              borderRadius: '8px',
+              padding: '12px',
+            }}>
+              {[
+                { label: 'Reverse Line Movement', value: hsa.signal_summary.reverse_line_movement },
+                { label: 'Steam Move', value: hsa.signal_summary.steam_move },
+                { label: 'Book Alignment', value: hsa.signal_summary.book_alignment },
+                { label: 'Public Bias', value: hsa.signal_summary.public_bias },
+              ].map((sig) => (
+                <div key={sig.label}>
+                  <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: T.font }}>{sig.label}</div>
+                  <div style={{ color: T.textSecondary, fontSize: '12px', fontWeight: 500, fontFamily: T.font, marginTop: '2px' }}>{sig.value || '—'}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Analysis sections */}
+            <div style={sectionStyle}>
+              <div style={sectionLabelStyle}>Line Movement</div>
+              <div style={sectionTextStyle}>{hsa.line_movement}</div>
+            </div>
+
+            <div style={sectionStyle}>
+              <div style={sectionLabelStyle}>Book Behavior</div>
+              <div style={sectionTextStyle}>{hsa.book_behavior}</div>
+            </div>
+
+            <div style={sectionStyle}>
+              <div style={sectionLabelStyle}>Public Positioning</div>
+              <div style={sectionTextStyle}>{hsa.public_positioning}</div>
+            </div>
+
+            <div style={sectionStyle}>
+              <div style={sectionLabelStyle}>Money Pattern</div>
+              <div style={sectionTextStyle}>{hsa.money_pattern}</div>
+            </div>
+
+            {/* Market Lean Reasoning — highlighted */}
+            <div style={{
+              background: T.bg,
+              border: `1px solid ${T.border}`,
+              borderRadius: '8px',
+              padding: '12px 14px',
+              marginBottom: '14px',
+            }}>
+              <div style={sectionLabelStyle}>Market Lean Reasoning</div>
+              <div style={{ ...sectionTextStyle, color: T.accent }}>{hsa.market_lean_reasoning}</div>
+            </div>
+
+            {/* Confirmation Factors */}
+            {hsa.confirmation_factors?.length > 0 && (
+              <div style={sectionStyle}>
+                <div style={sectionLabelStyle}>Confirmation Factors</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {hsa.confirmation_factors.map((f, i) => (
+                    <div key={i} style={{ color: T.textSecondary, fontSize: '12px', fontFamily: T.font, paddingLeft: '10px', borderLeft: `2px solid ${T.border}` }}>
+                      {f}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Totals Intel */}
+            <div style={sectionStyle}>
+              <div style={sectionLabelStyle}>Totals Intel</div>
+              <div style={sectionTextStyle}>{hsa.totals_intel}</div>
+            </div>
+
+            {error && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>{error}</div>}
+            <button onClick={() => handleGenerate(true)} disabled={loading} style={{ marginTop: '8px', background: 'transparent', border: `1px solid ${T.border}`, color: T.textSecondary, borderRadius: '6px', padding: '6px 14px', cursor: loading ? 'wait' : 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: T.font }}>
+              {loading ? 'Refreshing...' : 'Refresh Analysis'}
+            </button>
+          </div>
+        ) : isLegacy ? (
+          /* Legacy narrative fallback */
+          <div>
+            <div style={{ color: T.text, fontSize: '13px', lineHeight: 1.7, fontWeight: 500, fontFamily: T.font, whiteSpace: 'pre-wrap' }}>{localNarrative}</div>
             {error && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>{error}</div>}
             <button onClick={() => handleGenerate(true)} disabled={loading} style={{ marginTop: '12px', background: 'transparent', border: `1px solid ${T.border}`, color: T.textSecondary, borderRadius: '6px', padding: '6px 14px', cursor: loading ? 'wait' : 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: T.font }}>
               {loading ? 'Refreshing...' : 'Refresh Analysis'}
@@ -373,7 +568,7 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
         )}
 
         <div style={{ color: T.muted, fontSize: '10px', marginTop: '16px', fontFamily: T.font }}>
-          For informational and research purposes only.
+          For research purposes only.
         </div>
       </div>
     </div>
