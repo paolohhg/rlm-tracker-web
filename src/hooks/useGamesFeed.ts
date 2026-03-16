@@ -193,13 +193,82 @@ type EspnScoreEntry = { homeScore: number; awayScore: number; status: string; pe
 // Persist scores across polls — once ESPN drops a finished game, we keep the last known score
 const espnScoreCache: Record<string, EspnScoreEntry> = {};
 
+type EspnGameEntry = {
+  homeTeam: string;
+  awayTeam: string;
+  gameTime: string;
+  league: 'NBA' | 'NCAAB';
+  status: string;
+  homeScore: number;
+  awayScore: number;
+  period: number | null;
+  clock: string | null;
+};
+
+function formatDateYMD(d: Date): string {
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Fetch upcoming + live games from ESPN for today/tomorrow/day-after.
+// This catches NIT, CBI, and other tournaments that The Odds API or RLM detection may miss.
+async function fetchEspnGames(): Promise<EspnGameEntry[]> {
+  const entries: EspnGameEntry[] = [];
+  const today = new Date();
+  const dates = [0, 1, 2].map(offset => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + offset);
+    return formatDateYMD(d);
+  });
+
+  const requests: { url: string; league: 'NBA' | 'NCAAB' }[] = [];
+  for (const date of dates) {
+    requests.push({ url: `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${date}`, league: 'NBA' });
+    // groups=50 includes NCAA Tournament + NIT + CBI + CIT
+    requests.push({ url: `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?dates=${date}&groups=50`, league: 'NCAAB' });
+  }
+
+  await Promise.all(requests.map(async ({ url, league }) => {
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      for (const event of data.events ?? []) {
+        const comp = event.competitions?.[0];
+        if (!comp) continue;
+        const home = comp.competitors?.find((c: any) => c.homeAway === 'home');
+        const away = comp.competitors?.find((c: any) => c.homeAway === 'away');
+        if (!home || !away) continue;
+
+        const statusType = comp.status?.type?.name ?? '';
+        const espnStatus =
+          statusType === 'STATUS_FINAL' ? 'final' :
+          statusType === 'STATUS_IN_PROGRESS' || statusType === 'STATUS_HALFTIME' ? 'live' :
+          'upcoming';
+
+        entries.push({
+          homeTeam: home.team.displayName ?? home.team.shortDisplayName ?? '',
+          awayTeam: away.team.displayName ?? away.team.shortDisplayName ?? '',
+          gameTime: comp.date ?? event.date ?? '',
+          league,
+          status: espnStatus,
+          homeScore: parseInt(home.score ?? '0', 10),
+          awayScore: parseInt(away.score ?? '0', 10),
+          period: comp.status?.period ?? null,
+          clock: comp.status?.displayClock ?? null,
+        });
+      }
+    } catch { /* skip */ }
+  }));
+
+  return entries;
+}
+
 async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
   const map: Record<string, EspnScoreEntry> = {};
 
   const urls = [
     'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
-    // No groups filter — includes regular season, conference tournaments, NIT, CBI, etc.
-    'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard',
+    // groups=50 includes NCAA Tournament + NIT + CBI
+    'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50',
   ];
 
   await Promise.all(urls.map(async (url) => {
@@ -274,6 +343,7 @@ export function useGamesFeed() {
         scoresRes,
         splitsRes,
         espnScores,
+        espnGames,
       ] = await Promise.all([
         supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('game_time', { ascending: true }),
         supabase.from('rlm_alerts').select('*').order('detected_at', { ascending: false }),
@@ -282,6 +352,7 @@ export function useGamesFeed() {
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
         supabase.from('splits_snapshots').select('*').order('fetched_at', { ascending: false }),
         fetchEspnScores(),
+        fetchEspnGames(),
       ]);
 
       const tipoffs = tipoffRes.data ?? [];
@@ -354,6 +425,27 @@ export function useGamesFeed() {
             scenario_key: null,
             is_locked: false,
             created_at: o.fetched_at,
+          });
+        }
+      }
+
+      // Synthesize tipoff entries from ESPN schedule for games not in DB
+      // (catches NIT, CBI, and other tournaments before odds are published)
+      for (const eg of espnGames) {
+        const key = buildMatchKey(eg.league, eg.homeTeam, eg.awayTeam);
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueTipoffs.push({
+            game_id: null,
+            league: eg.league,
+            home_team: eg.homeTeam,
+            away_team: eg.awayTeam,
+            game_time: eg.gameTime,
+            signal_tier: null,
+            sharp_team: null,
+            scenario_key: null,
+            is_locked: false,
+            created_at: new Date().toISOString(),
           });
         }
       }
