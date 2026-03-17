@@ -1,27 +1,8 @@
-import { useState } from 'react';
 import { Dashboard } from './components/Dashboard';
-import { Heard2HTab } from './components/Heard2H/Heard2HTab';
-
-type Tab = 'dashboard' | 'heard2h';
 
 const FONT = 'Inter, "Segoe UI", Arial, sans-serif';
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('dashboard');
-
-  const tabStyle = (active: boolean): React.CSSProperties => ({
-    background: active ? '#00e5ff' : 'transparent',
-    border: active ? 'none' : '1px solid #1f2636',
-    color: active ? '#000' : '#94a3b8',
-    borderRadius: '6px',
-    padding: '8px 16px',
-    cursor: 'pointer',
-    fontWeight: 700,
-    fontSize: '12px',
-    fontFamily: FONT,
-    transition: 'all 150ms',
-  });
-
   return (
     <div style={{ background: '#0b0f19', minHeight: '100vh' }}>
       {/* Top Nav Bar */}
@@ -50,20 +31,9 @@ export default function App() {
             </span>
           </div>
         </div>
-
-        {/* Tab Buttons */}
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={tabStyle(tab === 'dashboard')} onClick={() => setTab('dashboard')}>
-            Dashboard
-          </button>
-          <button style={tabStyle(tab === 'heard2h')} onClick={() => setTab('heard2h')}>
-            2H Analysis
-          </button>
-        </div>
       </div>
 
-      {tab === 'dashboard' && <Dashboard />}
-      {tab === 'heard2h' && <Heard2HTab />}
+      <Dashboard />
     </div>
   );
 }
