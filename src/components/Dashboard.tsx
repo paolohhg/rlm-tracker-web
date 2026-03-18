@@ -7,7 +7,7 @@ import { T, BADGE_COLORS, STATUS_TAG_COLORS, CONFIDENCE_COLORS } from '../lib/th
 import type { GameView } from '../types';
 
 type StatusFilter = 'all' | 'upcoming' | 'live' | 'final';
-type LeagueFilter = 'all' | 'NBA' | 'NCAAB';
+type LeagueFilter = 'all' | 'NBA' | 'NCAAB' | 'MLB' | 'NHL';
 type TournamentFilter = 'all' | 'ncaa_tournament' | 'nit';
 type SignalFilter = 'all' | 'rlm' | 'steam' | 'freeze' | 'resistance' | 'fake_steam';
 type TimeFilter = 'all' | 'lt1h' | '1to3h' | 'gt3h';
@@ -136,6 +136,81 @@ function getNbaLogoUrl(teamName: string) {
   return logos[normalizeKey(teamName)] ?? null;
 }
 
+function getNhlLogoUrl(teamName: string) {
+  const logos: Record<string, string> = {
+    anaheimducks: 'https://a.espncdn.com/i/teamlogos/nhl/500/ana.png',
+    arizonacoyotes: 'https://a.espncdn.com/i/teamlogos/nhl/500/ari.png',
+    bostonbruins: 'https://a.espncdn.com/i/teamlogos/nhl/500/bos.png',
+    buffalosabres: 'https://a.espncdn.com/i/teamlogos/nhl/500/buf.png',
+    calgaryflames: 'https://a.espncdn.com/i/teamlogos/nhl/500/cgy.png',
+    carolinahurricanes: 'https://a.espncdn.com/i/teamlogos/nhl/500/car.png',
+    chicagoblackhawks: 'https://a.espncdn.com/i/teamlogos/nhl/500/chi.png',
+    coloradoavalanche: 'https://a.espncdn.com/i/teamlogos/nhl/500/col.png',
+    columbusbluejackets: 'https://a.espncdn.com/i/teamlogos/nhl/500/cbj.png',
+    dallasstars: 'https://a.espncdn.com/i/teamlogos/nhl/500/dal.png',
+    detroitredwings: 'https://a.espncdn.com/i/teamlogos/nhl/500/det.png',
+    edmontonoilers: 'https://a.espncdn.com/i/teamlogos/nhl/500/edm.png',
+    floridapanthers: 'https://a.espncdn.com/i/teamlogos/nhl/500/fla.png',
+    losangeleskings: 'https://a.espncdn.com/i/teamlogos/nhl/500/la.png',
+    minnesotawild: 'https://a.espncdn.com/i/teamlogos/nhl/500/min.png',
+    montrealcanadiens: 'https://a.espncdn.com/i/teamlogos/nhl/500/mtl.png',
+    nashvillepredators: 'https://a.espncdn.com/i/teamlogos/nhl/500/nsh.png',
+    newjerseydevils: 'https://a.espncdn.com/i/teamlogos/nhl/500/njd.png',
+    newyorkislanders: 'https://a.espncdn.com/i/teamlogos/nhl/500/nyi.png',
+    newyorkrangers: 'https://a.espncdn.com/i/teamlogos/nhl/500/nyr.png',
+    ottawasenators: 'https://a.espncdn.com/i/teamlogos/nhl/500/ott.png',
+    philadelphiaflyers: 'https://a.espncdn.com/i/teamlogos/nhl/500/phi.png',
+    pittsburghpenguins: 'https://a.espncdn.com/i/teamlogos/nhl/500/pit.png',
+    sanjosesharks: 'https://a.espncdn.com/i/teamlogos/nhl/500/sj.png',
+    seattlekraken: 'https://a.espncdn.com/i/teamlogos/nhl/500/sea.png',
+    stlouisblues: 'https://a.espncdn.com/i/teamlogos/nhl/500/stl.png',
+    tampabaylightning: 'https://a.espncdn.com/i/teamlogos/nhl/500/tb.png',
+    torontomapleleafs: 'https://a.espncdn.com/i/teamlogos/nhl/500/tor.png',
+    utahhockeyclub: 'https://a.espncdn.com/i/teamlogos/nhl/500/utah.png',
+    vancouvercanucks: 'https://a.espncdn.com/i/teamlogos/nhl/500/van.png',
+    vegasgoldenknights: 'https://a.espncdn.com/i/teamlogos/nhl/500/vgk.png',
+    washingtoncapitals: 'https://a.espncdn.com/i/teamlogos/nhl/500/wsh.png',
+    winnipegjets: 'https://a.espncdn.com/i/teamlogos/nhl/500/wpg.png',
+  };
+  return logos[normalizeKey(teamName)] ?? null;
+}
+
+function getMlbLogoUrl(teamName: string) {
+  const logos: Record<string, string> = {
+    arizonadiamondbacks: 'https://a.espncdn.com/i/teamlogos/mlb/500/ari.png',
+    atlantabraves: 'https://a.espncdn.com/i/teamlogos/mlb/500/atl.png',
+    baltimoreorioles: 'https://a.espncdn.com/i/teamlogos/mlb/500/bal.png',
+    bostonredsox: 'https://a.espncdn.com/i/teamlogos/mlb/500/bos.png',
+    chicagocubs: 'https://a.espncdn.com/i/teamlogos/mlb/500/chc.png',
+    chicagowhitesox: 'https://a.espncdn.com/i/teamlogos/mlb/500/chw.png',
+    cincinnatireds: 'https://a.espncdn.com/i/teamlogos/mlb/500/cin.png',
+    clevelandguardians: 'https://a.espncdn.com/i/teamlogos/mlb/500/cle.png',
+    coloradorockies: 'https://a.espncdn.com/i/teamlogos/mlb/500/col.png',
+    detroittigers: 'https://a.espncdn.com/i/teamlogos/mlb/500/det.png',
+    houstonastros: 'https://a.espncdn.com/i/teamlogos/mlb/500/hou.png',
+    kansascityroyals: 'https://a.espncdn.com/i/teamlogos/mlb/500/kc.png',
+    losangelesangels: 'https://a.espncdn.com/i/teamlogos/mlb/500/laa.png',
+    losangelesdodgers: 'https://a.espncdn.com/i/teamlogos/mlb/500/lad.png',
+    miamimarlins: 'https://a.espncdn.com/i/teamlogos/mlb/500/mia.png',
+    milwaukeebrewers: 'https://a.espncdn.com/i/teamlogos/mlb/500/mil.png',
+    minnesotatwins: 'https://a.espncdn.com/i/teamlogos/mlb/500/min.png',
+    newyorkmets: 'https://a.espncdn.com/i/teamlogos/mlb/500/nym.png',
+    newyorkyankees: 'https://a.espncdn.com/i/teamlogos/mlb/500/nyy.png',
+    oaklandathletics: 'https://a.espncdn.com/i/teamlogos/mlb/500/oak.png',
+    philadelphiaphillies: 'https://a.espncdn.com/i/teamlogos/mlb/500/phi.png',
+    pittsburghpirates: 'https://a.espncdn.com/i/teamlogos/mlb/500/pit.png',
+    sandiegopadres: 'https://a.espncdn.com/i/teamlogos/mlb/500/sd.png',
+    sanfranciscogiants: 'https://a.espncdn.com/i/teamlogos/mlb/500/sf.png',
+    seattlemariners: 'https://a.espncdn.com/i/teamlogos/mlb/500/sea.png',
+    stlouiscardinals: 'https://a.espncdn.com/i/teamlogos/mlb/500/stl.png',
+    tampabayrays: 'https://a.espncdn.com/i/teamlogos/mlb/500/tb.png',
+    texasrangers: 'https://a.espncdn.com/i/teamlogos/mlb/500/tex.png',
+    torontobluejays: 'https://a.espncdn.com/i/teamlogos/mlb/500/tor.png',
+    washingtonnationals: 'https://a.espncdn.com/i/teamlogos/mlb/500/wsh.png',
+  };
+  return logos[normalizeKey(teamName)] ?? null;
+}
+
 let ncaabLogoCache: Record<string, string> | null = null;
 let ncaabLogoCachePromise: Promise<Record<string, string>> | null = null;
 
@@ -169,6 +244,8 @@ function getTeamLogo(league: string, teamName: string, ncaabLogos: Record<string
   const l = league.toUpperCase();
   if (l === 'NBA') return getNbaLogoUrl(teamName);
   if (l === 'NCAAB') return ncaabLogos[normalizeKey(teamName)] ?? null;
+  if (l === 'NHL') return getNhlLogoUrl(teamName);
+  if (l === 'MLB') return getMlbLogoUrl(teamName);
   return null;
 }
 
@@ -885,7 +962,7 @@ export function Dashboard() {
             {/* League */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
               <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>League</span>
-              {(['all', 'NBA', 'NCAAB'] as LeagueFilter[]).map((lf) => (
+              {(['all', 'NBA', 'NCAAB', 'NHL', 'MLB'] as LeagueFilter[]).map((lf) => (
                 <button key={lf} onClick={() => { setLeagueFilter(lf); if (lf !== 'NCAAB') setTournamentFilter('all'); }} style={filterBtnStyle(leagueFilter === lf)}>
                   {lf === 'all' ? 'All' : lf}
                 </button>
