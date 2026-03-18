@@ -197,7 +197,7 @@ type EspnGameEntry = {
   homeTeam: string;
   awayTeam: string;
   gameTime: string;
-  league: 'NBA' | 'NCAAB';
+  league: 'NBA' | 'NCAAB' | 'NHL' | 'MLB';
   tournament: Tournament;
   status: string;
   homeScore: number;
@@ -206,8 +206,8 @@ type EspnGameEntry = {
   clock: string | null;
 };
 
-function parseTournament(event: any, league: 'NBA' | 'NCAAB'): Tournament {
-  if (league === 'NBA') return null;
+function parseTournament(event: any, league: 'NBA' | 'NCAAB' | 'NHL' | 'MLB'): Tournament {
+  if (league !== 'NCAAB') return null;
   // ESPN exposes tournament info in notes and season type
   const notes: string = (event.competitions?.[0]?.notes?.[0]?.headline ?? event.notes?.[0]?.headline ?? '').toLowerCase();
   if (notes.includes('ncaa tournament') || notes.includes('march madness') || notes.includes('ncaa ')) return 'ncaa_tournament';
@@ -238,11 +238,13 @@ async function fetchEspnGames(): Promise<EspnGameEntry[]> {
     return formatDateYMD(d);
   });
 
-  const requests: { url: string; league: 'NBA' | 'NCAAB' }[] = [];
+  const requests: { url: string; league: 'NBA' | 'NCAAB' | 'NHL' | 'MLB' }[] = [];
   for (const date of dates) {
     requests.push({ url: `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=${date}`, league: 'NBA' });
     // groups=50 includes NCAA Tournament + NIT + CBI + CIT
     requests.push({ url: `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?dates=${date}&groups=50`, league: 'NCAAB' });
+    requests.push({ url: `https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard?dates=${date}`, league: 'NHL' });
+    requests.push({ url: `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=${date}`, league: 'MLB' });
   }
 
   await Promise.all(requests.map(async ({ url, league }) => {
