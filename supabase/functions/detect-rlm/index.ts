@@ -16,7 +16,7 @@ serve(async (req) => {
     );
 
     const now = new Date();
-    const windowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // Get all upcoming games from odds_snapshots directly
     const { data: recentOdds, error } = await supabase
