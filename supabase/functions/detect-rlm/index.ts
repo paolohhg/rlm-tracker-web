@@ -59,69 +59,137 @@ serve(async (req) => {
         bookMap[bk].push(snap);
       }
 
-      // Calculate movement per book
+      // Calculate spread movement per book
       const bookMovements: number[] = [];
       const bookSpreads: { open: number; current: number; book: string }[] = [];
 
+      // Calculate moneyline movement per book (critical for NHL/MLB)
+      const mlMovements: number[] = [];
+      const bookMLs: { open: number; current: number; book: string }[] = [];
+
       for (const [book, bookSnaps] of Object.entries(bookMap)) {
         if (bookSnaps.length < 2) continue;
-        const open = bookSnaps[0].spread;
-        const current = bookSnaps[bookSnaps.length - 1].spread;
-        if (open == null || current == null) continue;
-        const move = parseFloat((current - open).toFixed(1));
-        bookMovements.push(move);
-        bookSpreads.push({ open, current, book });
+
+        // Spread movement
+        const openSpd = bookSnaps[0].spread;
+        const currSpd = bookSnaps[bookSnaps.length - 1].spread;
+        if (openSpd != null && currSpd != null) {
+          const move = parseFloat((currSpd - openSpd).toFixed(1));
+          bookMovements.push(move);
+          bookSpreads.push({ open: openSpd, current: currSpd, book });
+        }
+
+        // Moneyline movement (home ML)
+        const openML = bookSnaps[0].moneyline_home;
+        const currML = bookSnaps[bookSnaps.length - 1].moneyline_home;
+        if (openML != null && currML != null) {
+          const mlMove = parseFloat((currML - openML).toFixed(0));
+          mlMovements.push(mlMove);
+          bookMLs.push({ open: openML, current: currML, book });
+        }
       }
 
-      if (bookMovements.length === 0) continue;
+      // For NHL/MLB: moneyline is primary signal if spread barely moves
+      const isMLPrimary = league === "NHL" || league === "MLB";
+      const hasSpreadData = bookMovements.length > 0;
+      const hasMLData = mlMovements.length > 0;
 
-      // Consensus movement: median across books
-      const sorted = [...bookMovements].sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      const consensusMove = sorted.length % 2 === 0
-        ? (sorted[mid - 1] + sorted[mid]) / 2
-        : sorted[mid];
+      if (!hasSpreadData && !hasMLData) continue;
+
+      // Consensus spread movement (median)
+      let consensusMove = 0;
+      if (hasSpreadData) {
+        const sorted = [...bookMovements].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        consensusMove = sorted.length % 2 === 0
+          ? (sorted[mid - 1] + sorted[mid]) / 2
+          : sorted[mid];
+      }
+
+      // Consensus ML movement (median, in cents)
+      let consensusMLMove = 0;
+      if (hasMLData) {
+        const mlSorted = [...mlMovements].sort((a, b) => a - b);
+        const mlMid = Math.floor(mlSorted.length / 2);
+        consensusMLMove = mlSorted.length % 2 === 0
+          ? (mlSorted[mlMid - 1] + mlSorted[mlMid]) / 2
+          : mlSorted[mlMid];
+      }
 
       const absMove = Math.abs(consensusMove);
-      const booksAgreeing = bookMovements.filter(m => Math.sign(m) === Math.sign(consensusMove) && Math.abs(m) >= 0.5).length;
-      const totalBooks = bookMovements.length;
+      const absMLMove = Math.abs(consensusMLMove);
+
+      // League-aware thresholds
+      const spreadThreshold = isMLPrimary ? 0.3 : 0.5;
+      const mlThreshold = league === "NHL" ? 15 : league === "MLB" ? 10 : 30;
+
+      // Books agreeing on spread OR moneyline direction
+      const booksAgreeingSpread = hasSpreadData
+        ? bookMovements.filter(m => Math.sign(m) === Math.sign(consensusMove) && Math.abs(m) >= spreadThreshold).length
+        : 0;
+      const booksAgreeingML = hasMLData
+        ? mlMovements.filter(m => Math.sign(m) === Math.sign(consensusMLMove) && Math.abs(m) >= mlThreshold).length
+        : 0;
+      const booksAgreeing = Math.max(booksAgreeingSpread, booksAgreeingML);
+      const totalBooks = Math.max(bookMovements.length, mlMovements.length);
+
+      // Use ML-based signal when spread is flat but ML moved (common in NHL/MLB)
+      const mlSignal = isMLPrimary && absMLMove >= mlThreshold && booksAgreeingML >= 2;
+      const spreadSignal = absMove >= spreadThreshold;
+      const hasSignal = spreadSignal || mlSignal;
 
       // Opening and current spread (consensus)
-      const openSpread = bookSpreads.reduce((sum, b) => sum + b.open, 0) / bookSpreads.length;
-      const currentSpread = bookSpreads.reduce((sum, b) => sum + b.current, 0) / bookSpreads.length;
+      const openSpread = hasSpreadData
+        ? bookSpreads.reduce((sum, b) => sum + b.open, 0) / bookSpreads.length
+        : 0;
+      const currentSpread = hasSpreadData
+        ? bookSpreads.reduce((sum, b) => sum + b.current, 0) / bookSpreads.length
+        : 0;
 
-      // Direction: positive = line moved toward away team (home getting worse)
-      const sharpTeam = consensusMove > 0 ? awayTeam : homeTeam;
-      const fadeTeam = consensusMove > 0 ? homeTeam : awayTeam;
+      // Direction: for ML-primary sports, use ML direction if spread is flat
+      let sharpTeam: string;
+      let fadeTeam: string;
+      if (isMLPrimary && !spreadSignal && mlSignal) {
+        // Negative ML movement = home becoming more favored = sharp on home
+        sharpTeam = consensusMLMove < 0 ? homeTeam : awayTeam;
+        fadeTeam = consensusMLMove < 0 ? awayTeam : homeTeam;
+      } else {
+        sharpTeam = consensusMove > 0 ? awayTeam : homeTeam;
+        fadeTeam = consensusMove > 0 ? homeTeam : awayTeam;
+      }
 
       // Velocity: how fast did the move happen?
       const firstSnap = snaps[0];
       const lastSnap = snaps[snaps.length - 1];
       const hoursElapsed = (new Date(lastSnap.fetched_at).getTime() - new Date(firstSnap.fetched_at).getTime()) / (1000 * 60 * 60);
       const velocityPerHour = hoursElapsed > 0 ? absMove / hoursElapsed : 0;
+      const mlVelocityPerHour = hoursElapsed > 0 ? absMLMove / hoursElapsed : 0;
 
-      // Detect signal tier
+      // Detect signal tier (league-aware)
       let signalTier = "";
       let scenarioKey = "";
 
-      if (absMove >= 0.5 && booksAgreeing >= 3) {
-        if (velocityPerHour >= 0.5) {
+      if (hasSignal && booksAgreeing >= 3) {
+        const isHighVelocity = isMLPrimary
+          ? (mlVelocityPerHour >= 10 || velocityPerHour >= 0.3)
+          : velocityPerHour >= 0.5;
+
+        if (isHighVelocity) {
           signalTier = "STEAM MOVE";
-          scenarioKey = `STEAM|${booksAgreeing}books|${absMove.toFixed(1)}pts`;
+          scenarioKey = `STEAM|${booksAgreeing}books|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
         } else {
           signalTier = "NO-NARRATIVE RLM";
-          scenarioKey = `RLM|${booksAgreeing}books|${absMove.toFixed(1)}pts`;
+          scenarioKey = `RLM|${booksAgreeing}books|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
         }
-      } else if (absMove >= 0.5 && booksAgreeing >= 1) {
+      } else if (hasSignal && booksAgreeing >= 1) {
         signalTier = "BOOK SHADE";
-        scenarioKey = `SHADE|${booksAgreeing}books|${absMove.toFixed(1)}pts`;
-      } else if (absMove < 0.2 && totalBooks >= 2) {
-        // Juice moved but spread frozen
+        scenarioKey = `SHADE|${booksAgreeing}books|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
+      } else if (absMove < 0.2 && absMLMove < 5 && totalBooks >= 2) {
         signalTier = "FROZEN LINE";
         scenarioKey = `FROZEN|${totalBooks}books`;
-      } else if (absMove >= 0.3) {
+      } else if (absMove >= 0.3 || (isMLPrimary && absMLMove >= mlThreshold * 0.7)) {
         signalTier = "WATCH";
-        scenarioKey = `WATCH|${absMove.toFixed(1)}pts`;
+        scenarioKey = `WATCH|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
       }
 
       if (!signalTier) continue;
@@ -154,7 +222,7 @@ serve(async (req) => {
         scenarioKey = `DOUBLE_RLM|${booksAgreeing}books|${absMove.toFixed(1)}pts`;
       }
 
-      const alert = {
+      const alert: Record<string, unknown> = {
         home_team: homeTeam,
         away_team: awayTeam,
         league,
@@ -171,6 +239,11 @@ serve(async (req) => {
         hsa_narrative: hsaNarrative,
         detected_at: now.toISOString(),
       };
+
+      // Add moneyline movement for ML-primary sports (NHL/MLB)
+      if (isMLPrimary && hasMLData) {
+        alert.moneyline_move = parseFloat(consensusMLMove.toFixed(0));
+      }
 
       // Upsert into rlm_alerts
       await supabase.from("rlm_alerts").upsert(alert, { onConflict: "home_team,away_team,league" });

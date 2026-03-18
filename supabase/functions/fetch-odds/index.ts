@@ -10,6 +10,7 @@ const LEAGUES = [
   { key: "basketball_ncaab",        league: "NCAAB" },
   { key: "basketball_ncaab_nit",    league: "NCAAB" }, // NIT Tournament
   { key: "baseball_mlb",            league: "MLB"   },
+  { key: "icehockey_nhl",           league: "NHL"   },
 ];
 
 const BOOKMAKERS = "draftkings,fanduel,betmgm,pinnacle,caesars,pointsbetus,espnbet";
@@ -42,6 +43,7 @@ function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
 // ── Markets per league ────────────────────────────────────────
 function marketsForLeague(league: string): string {
   if (league === "MLB") return "spreads,h2h,totals,alternate_runlines";
+  if (league === "NHL") return "h2h,totals,spreads"; // puck line = spreads
   return "spreads,h2h,totals";
 }
 

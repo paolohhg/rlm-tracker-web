@@ -154,6 +154,7 @@ const TOTAL_SANITY_BOUNDS: Record<string, { min: number; max: number }> = {
   NBA:   { min: 180, max: 280 },
   NCAAB: { min: 100, max: 220 },
   MLB:   { min: 4, max: 16 },
+  NHL:   { min: 3.5, max: 9.5 },
 };
 
 // League-specific sanity bounds for full-game spreads
@@ -161,6 +162,7 @@ const SPREAD_SANITY_BOUNDS: Record<string, { max: number }> = {
   NBA:   { max: 30 },
   NCAAB: { max: 40 },
   MLB:   { max: 5 },
+  NHL:   { max: 3.5 },
 };
 
 function classifyOddsRow(
@@ -169,7 +171,7 @@ function classifyOddsRow(
   gameTime: string,
 ): NormalizedOddsRow[] {
   const eventId = `${league}|${row.home_team || ''}|${row.away_team || ''}|${gameTime}`;
-  const sport = league === 'MLB' ? 'baseball' : 'basketball';
+  const sport = league === 'MLB' ? 'baseball' : league === 'NHL' ? 'hockey' : 'basketball';
   const book = row.bookmaker;
   const bookType = row.book_type || 'square';
   const timestamp = row.fetched_at;
@@ -336,9 +338,14 @@ function minutesBetween(a: string, b: string): number {
   return Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 60000;
 }
 
-const BASKETBALL_KEY_NUMBERS = [3, 4, 5, 6, 7, 8, 10, 14];
+const KEY_NUMBERS: Record<string, number[]> = {
+  NBA:   [3, 4, 5, 6, 7, 8, 10, 14],
+  NCAAB: [3, 4, 5, 6, 7, 8, 10, 14],
+  MLB:   [1.5],
+  NHL:   [1.5],
+};
 
-function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary {
+function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: string = 'NBA'): OddsSummary {
   if (!snapshots.length) {
     return {
       snapshotCount: 0, trackingHours: 0, books: [],
@@ -446,10 +453,11 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string): OddsSummary
 
   const openAbsSpread = Math.abs(openingConsensusSpread);
   const currentAbsSpread = Math.abs(currentConsensusSpread);
-  const crossedKeyNumber = BASKETBALL_KEY_NUMBERS.some(
+  const leagueKeyNumbers = KEY_NUMBERS[league] || KEY_NUMBERS.NBA;
+  const crossedKeyNumber = leagueKeyNumbers.some(
     (k) => (openAbsSpread < k && currentAbsSpread >= k) || (openAbsSpread > k && currentAbsSpread <= k)
   );
-  const keyNumbersNear = BASKETBALL_KEY_NUMBERS.filter((k) => Math.abs(currentAbsSpread - k) <= 1);
+  const keyNumbersNear = leagueKeyNumbers.filter((k) => Math.abs(currentAbsSpread - k) <= 1);
 
   // Totals sharp indicators
   let totalSteamMove = false;
@@ -723,7 +731,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Preprocess clean odds into structured summary
-    const summary = summarizeOdds(cleanSnapshots, game_time);
+    const summary = summarizeOdds(cleanSnapshots, game_time, league);
 
     // Fetch betting splits from splits_snapshots table
     let splitsData: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null = null;
