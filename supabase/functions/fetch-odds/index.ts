@@ -10,6 +10,7 @@ const LEAGUES = [
   { key: "basketball_ncaab",        league: "NCAAB" },
   { key: "basketball_ncaab_nit",    league: "NCAAB" }, // NIT Tournament
   { key: "baseball_mlb",            league: "MLB"   },
+  { key: "baseball_mlb_preseason",  league: "MLB"   }, // Spring Training
   { key: "icehockey_nhl",           league: "NHL"   },
 ];
 
@@ -41,7 +42,9 @@ function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
 }
 
 // ── Markets per league ────────────────────────────────────────
-function marketsForLeague(league: string): string {
+function marketsForLeague(key: string, league: string): string {
+  // MLB preseason doesn't support alternate_runlines
+  if (league === "MLB" && key.includes("preseason")) return "spreads,h2h,totals";
   if (league === "MLB") return "spreads,h2h,totals,alternate_runlines";
   if (league === "NHL") return "h2h,totals,spreads"; // puck line = spreads
   return "spreads,h2h,totals";
@@ -67,7 +70,7 @@ serve(async () => {
   );
 
   for (const { key, league } of LEAGUES) {
-    const markets = marketsForLeague(league);
+    const markets = marketsForLeague(key, league);
     const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
 
     let games: Record<string, unknown>[];
@@ -186,9 +189,16 @@ serve(async () => {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 
+  // Count rows per league for debugging
+  const leagueCounts: Record<string, number> = {};
+  for (const r of rows) {
+    leagueCounts[r.league as string] = (leagueCounts[r.league as string] || 0) + 1;
+  }
+
   return new Response(JSON.stringify({
     inserted: rows.length,
     api_calls: apiCalls,
     leagues: LEAGUES.map(l => l.league),
+    league_counts: leagueCounts,
   }), { status: 200 });
 });
