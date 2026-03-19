@@ -163,53 +163,77 @@ export function generateSignalPost(game: GameView, options: SignalOptions): stri
   lines.push('HSI SIGNAL');
   lines.push('');
 
-  // Team + line
-  if (game.sharpTeam) {
-    lines.push(`${game.sharpTeam} ${formatSpread(game.currentSpread)}`);
-  } else {
-    lines.push(`${game.awayTeam} @ ${game.homeTeam}`);
-    if (game.currentSpread != null) {
-      const homeFavored = game.currentSpread < 0;
-      const fav = homeFavored ? game.homeTeam : game.awayTeam;
-      lines.push(`${fav} ${formatSpread(game.currentSpread)}`);
-    }
-  }
+  // Determine if total signal is stronger than side signal
+  const sideConfidence = game.signalTier ? deriveConfidenceLabel(game.signalTier) : 'Low';
+  const totalConf = deriveTotalConfidenceLabel(game);
+  const totalMove = game.openingTotal != null && game.currentTotal != null
+    ? Math.abs(game.currentTotal - game.openingTotal)
+    : 0;
+  const hasTotalSignal = totalMove >= 0.5 && totalConf != null;
 
-  // Supporting data
-  if (options.showSupportingData) {
-    lines.push('');
-    if (game.booksAgreeing != null && game.totalBooks != null) {
-      lines.push(`Books aligned: ${game.booksAgreeing}/${game.totalBooks}`);
-    }
-    if (game.signalTier && game.signalTier !== 'WATCH' && game.signalTier !== 'TRACKING') {
-      lines.push(`Signal: ${signalTierLabel(game.signalTier)}`);
-    }
-    if (game.velocityPerHour != null && game.velocityPerHour > 0) {
-      lines.push(`Velocity: ${game.velocityPerHour} pts/hr`);
-    }
-  }
+  const confRank: Record<string, number> = { 'Very High': 5, 'High': 4, 'Elevated': 3, 'Moderate': 2, 'Low': 1 };
+  const sideRank = confRank[sideConfidence] ?? 0;
+  const totalRank = totalConf ? (confRank[totalConf] ?? 0) : 0;
 
-  // Confidence — side
-  if (options.showConfidence && game.signalTier) {
-    lines.push('');
-    lines.push(`Side Confidence: ${deriveConfidenceLabel(game.signalTier)}`);
-  }
+  // Show both side and total, but lead with whichever is stronger
+  const totalIsStronger = hasTotalSignal && totalRank > sideRank;
 
-  // Total data
-  if (game.openingTotal != null && game.currentTotal != null && Math.abs(game.currentTotal - game.openingTotal) >= 0.5) {
+  // Matchup
+  lines.push(`${game.awayTeam} @ ${game.homeTeam}`);
+
+  // ── Total signal (if present) ──
+  if (hasTotalSignal) {
+    const totalDir = game.currentTotal! > game.openingTotal! ? 'Over' : 'Under';
     lines.push('');
-    const totalDir = game.currentTotal > game.openingTotal ? 'Over' : 'Under';
-    lines.push(`Total: ${game.openingTotal} \u2192 ${game.currentTotal} (${totalDir})`);
+    lines.push(`${totalDir} ${game.currentTotal}`);
+    lines.push(`Total: ${game.openingTotal} \u2192 ${game.currentTotal}`);
     if (options.showSupportingData) {
       if (game.overTicketPct != null && game.underTicketPct != null) {
         lines.push(`O/U Tickets: ${game.overTicketPct}% / ${game.underTicketPct}%`);
       }
+      if (game.overMoneyPct != null && game.underMoneyPct != null) {
+        lines.push(`O/U Money: ${game.overMoneyPct}% / ${game.underMoneyPct}%`);
+      }
+    }
+    if (options.showConfidence && totalConf) {
+      lines.push(`Total Confidence: ${totalConf}`);
+    }
+  }
+
+  // ── Side signal ──
+  const hasActiveSideSignal = game.signalTier && game.signalTier !== 'WATCH' && game.signalTier !== 'TRACKING';
+  if (hasActiveSideSignal || game.sharpTeam) {
+    lines.push('');
+    if (game.sharpTeam) {
+      lines.push(`${game.sharpTeam} ${formatSpread(game.currentSpread)}`);
+    } else if (game.currentSpread != null) {
+      const homeFavored = game.currentSpread < 0;
+      const fav = homeFavored ? game.homeTeam : game.awayTeam;
+      lines.push(`${fav} ${formatSpread(game.currentSpread)}`);
+    }
+
+    if (options.showSupportingData) {
+      if (game.booksAgreeing != null && game.totalBooks != null) {
+        lines.push(`Books aligned: ${game.booksAgreeing}/${game.totalBooks}`);
+      }
+      if (hasActiveSideSignal) {
+        lines.push(`Signal: ${signalTierLabel(game.signalTier!)}`);
+      }
+      if (game.velocityPerHour != null && game.velocityPerHour > 0) {
+        lines.push(`Velocity: ${game.velocityPerHour} pts/hr`);
+      }
+    }
+    if (options.showConfidence && game.signalTier) {
+      lines.push(`Side Confidence: ${sideConfidence}`);
+    }
+  } else if (!hasTotalSignal) {
+    // No signal at all — show basic spread info
+    if (game.currentSpread != null) {
+      lines.push('');
+      lines.push(`Current Line: ${formatSpread(game.currentSpread)}`);
     }
     if (options.showConfidence) {
-      const totalConf = deriveTotalConfidenceLabel(game);
-      if (totalConf) {
-        lines.push(`Total Confidence: ${totalConf}`);
-      }
+      lines.push(`Side Confidence: ${sideConfidence}`);
     }
   }
 

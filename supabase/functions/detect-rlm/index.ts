@@ -184,9 +184,10 @@ serve(async (req) => {
       } else if (hasSignal && booksAgreeing >= 1) {
         signalTier = "BOOK SHADE";
         scenarioKey = `SHADE|${booksAgreeing}books|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
-      } else if (absMove < 0.2 && absMLMove < 5 && totalBooks >= 2) {
+      } else if (absMove < 0.2 && absMLMove < 5 && totalBooks >= 2 && hoursElapsed >= 3) {
+        // Only tag as FROZEN if the line has been tracked for 3+ hours and truly hasn't moved
         signalTier = "FROZEN LINE";
-        scenarioKey = `FROZEN|${totalBooks}books`;
+        scenarioKey = `FROZEN|${totalBooks}books|${hoursElapsed.toFixed(0)}h`;
       } else if (absMove >= 0.3 || (isMLPrimary && absMLMove >= mlThreshold * 0.7)) {
         signalTier = "WATCH";
         scenarioKey = `WATCH|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;

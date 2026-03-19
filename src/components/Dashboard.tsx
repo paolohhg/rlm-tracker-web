@@ -80,8 +80,9 @@ function formatGameTime(gameTime: string) {
 
 function statusLabel(game: GameView) {
   if (game.status === 'live') {
-    if (game.period && game.gameClock) return `Q${game.period} ${game.gameClock}`;
-    if (game.period) return `Q${game.period}`;
+    const pPrefix = game.league === 'NHL' ? 'P' : game.league === 'MLB' ? 'Inn' : 'Q';
+    if (game.period && game.gameClock) return `${pPrefix}${game.period} ${game.gameClock}`;
+    if (game.period) return `${pPrefix}${game.period}`;
     return 'LIVE';
   }
   if (game.status === 'final') return 'FINAL';
@@ -613,21 +614,23 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
         )}
       </td>
 
-      {/* SHARE */}
+      {/* SHARE — pregame only */}
       <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
         <button
-          onClick={(e) => { e.stopPropagation(); onShare(game); }}
+          onClick={(e) => { e.stopPropagation(); if (game.status === 'upcoming') onShare(game); }}
+          disabled={game.status !== 'upcoming'}
           style={{
             background: 'transparent',
             border: `1px solid ${T.border}`,
-            color: T.textSecondary,
+            color: game.status === 'upcoming' ? T.textSecondary : T.muted,
             borderRadius: '6px',
             padding: '5px 10px',
-            cursor: 'pointer',
+            cursor: game.status === 'upcoming' ? 'pointer' : 'not-allowed',
             fontWeight: 600,
             fontSize: '11px',
             fontFamily: T.font,
             whiteSpace: 'nowrap',
+            opacity: game.status === 'upcoming' ? 1 : 0.4,
           }}
         >
           Share
@@ -755,24 +758,26 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
         <div style={{ color: '#facc15', fontSize: '11px', fontWeight: 500, marginTop: '4px', fontFamily: T.font }}>{game.fakeSteamReason}</div>
       )}
 
-      {/* Actions */}
+      {/* Actions — Share is pregame only */}
       <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
-        <button
-          onClick={(e) => { e.stopPropagation(); onShare(game); }}
-          style={{
-            background: 'transparent',
-            border: `1px solid rgba(0, 229, 255, 0.3)`,
-            color: T.accent,
-            borderRadius: '6px',
-            padding: '6px 10px',
-            cursor: 'pointer',
-            fontWeight: 600,
-            fontSize: '11px',
-            fontFamily: T.font,
-          }}
-        >
-          Share
-        </button>
+        {game.status === 'upcoming' && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onShare(game); }}
+            style={{
+              background: 'transparent',
+              border: `1px solid rgba(0, 229, 255, 0.3)`,
+              color: T.accent,
+              borderRadius: '6px',
+              padding: '6px 10px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '11px',
+              fontFamily: T.font,
+            }}
+          >
+            Share
+          </button>
+        )}
       </div>
     </div>
   );

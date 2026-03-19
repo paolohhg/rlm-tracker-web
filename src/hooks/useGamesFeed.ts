@@ -261,7 +261,7 @@ async function fetchEspnGames(): Promise<EspnGameEntry[]> {
         const statusType = comp.status?.type?.name ?? '';
         const espnStatus =
           statusType === 'STATUS_FINAL' ? 'final' :
-          statusType === 'STATUS_IN_PROGRESS' || statusType === 'STATUS_HALFTIME' ? 'live' :
+          statusType === 'STATUS_IN_PROGRESS' || statusType === 'STATUS_HALFTIME' || statusType === 'STATUS_END_PERIOD' ? 'live' :
           'upcoming';
 
         entries.push({
@@ -306,7 +306,7 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
         const statusType = comp.status?.type?.name ?? '';
         const espnStatus =
           statusType === 'STATUS_FINAL' ? 'final' :
-          statusType === 'STATUS_IN_PROGRESS' || statusType === 'STATUS_HALFTIME' ? 'live' :
+          statusType === 'STATUS_IN_PROGRESS' || statusType === 'STATUS_HALFTIME' || statusType === 'STATUS_END_PERIOD' ? 'live' :
           'upcoming';
 
         const entry: EspnScoreEntry = {
@@ -571,7 +571,8 @@ export function useGamesFeed() {
 
         if (espn && (espn.status === 'live' || espn.status === 'final')) {
           const clock = espn.status === 'live' && espn.clock ? ` ${espn.clock}` : '';
-          const period = espn.period ? ` Q${espn.period}${clock}` : '';
+          const pPrefix = t.league === 'NHL' ? 'P' : t.league === 'MLB' ? 'Inn' : 'Q';
+          const period = espn.period ? ` ${pPrefix}${espn.period}${clock}` : '';
           const suffix = espn.status === 'final' ? ' • Final' : period;
           hsaSnippet = `${t.away_team} ${espn.awayScore} - ${t.home_team} ${espn.homeScore}${suffix}`;
         } else if (score?.home_score != null && score?.away_score != null) {
