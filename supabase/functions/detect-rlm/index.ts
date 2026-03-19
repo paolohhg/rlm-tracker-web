@@ -73,32 +73,104 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const now = new Date();
-    const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    // ── Parse optional request body ──────────────────────────────
+    // Accepts { slateDate?: "2026-03-19", oddsWindowHours?: 18 }
+    let slateDate: string | null = null;
+    let oddsWindowHours = 18; // default: 18h lookback for odds freshness
+    try {
+      const body = await req.json();
+      if (body?.slateDate) slateDate = body.slateDate;       // "YYYY-MM-DD"
+      if (body?.oddsWindowHours) oddsWindowHours = body.oddsWindowHours;
+    } catch { /* no body or invalid JSON — use defaults */ }
 
+    const now = new Date();
+    const nowISO = now.toISOString();
+
+    // ═══════════════════════════════════════════════════════════════
+    //  SLATE WINDOW — only fetch games that haven't started yet
+    //
+    //  • game_time > now + 5 min (exclude games about to tip)
+    //  • game_time < end of slate window
+    //  • If slateDate provided: only that calendar date
+    //  • Default: games starting in the next 24 hours
+    //
+    //  ODDS FRESHNESS — only snapshots within oddsWindowHours
+    //  (default 18h covers overnight sharp → pregame)
+    // ═══════════════════════════════════════════════════════════════
+
+    const fiveMinFromNow = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
+    const oddsWindowStart = new Date(now.getTime() - oddsWindowHours * 60 * 60 * 1000).toISOString();
+
+    let slateStart: string;
+    let slateEnd: string;
+
+    if (slateDate) {
+      // Specific date requested — use full calendar day (midnight to midnight UTC)
+      slateStart = `${slateDate}T00:00:00Z`;
+      slateEnd = `${slateDate}T23:59:59Z`;
+    } else {
+      // Default: games starting from now+5min through next 24 hours
+      slateStart = fiveMinFromNow;
+      slateEnd = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    // ── Step 1: Find active slate games (pregame only) ───────────
+    //    Get distinct game keys where game_time is in our slate window
+    //    and game hasn't started yet (game_time > now)
+    const { data: slateGames, error: slateErr } = await supabase
+      .from("odds_snapshots")
+      .select("league, home_team, away_team, game_time")
+      .gt("game_time", fiveMinFromNow)     // pregame only — hasn't started
+      .gte("game_time", slateStart)         // within slate window start
+      .lte("game_time", slateEnd)           // within slate window end
+      .gte("fetched_at", oddsWindowStart)   // odds snapshot is fresh
+      .order("game_time", { ascending: true });
+
+    if (slateErr) throw slateErr;
+    if (!slateGames || slateGames.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, message: "No pregame slate games found", slate: { slateStart, slateEnd } }),
+        { status: 200, headers: { ...cors, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Deduplicate to unique game keys
+    const activeGameKeys = new Set<string>();
+    const gameTimeMap: Record<string, string> = {};
+    for (const g of slateGames) {
+      const key = `${g.league}|${g.home_team}|${g.away_team}`;
+      activeGameKeys.add(key);
+      if (!gameTimeMap[key]) gameTimeMap[key] = g.game_time;
+    }
+
+    // ── Step 2: Fetch odds only for active slate games ───────────
+    //    Use the freshness window, not a 7-day lookback
     const { data: recentOdds, error } = await supabase
       .from("odds_snapshots")
       .select("*")
-      .gte("fetched_at", windowStart)
+      .gt("game_time", fiveMinFromNow)       // game hasn't started
+      .gte("fetched_at", oddsWindowStart)     // fresh odds only
       .order("fetched_at", { ascending: true });
 
     if (error) throw error;
     if (!recentOdds || recentOdds.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, message: "No odds data" }),
+        JSON.stringify({ success: true, message: "No fresh odds for slate", slate: { games: activeGameKeys.size } }),
         { status: 200, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
 
-    // Group by game key
+    // Group by game key — only include games on the active slate
     const gameMap: Record<string, any[]> = {};
     for (const snap of recentOdds) {
       const key = `${snap.league}|${snap.home_team}|${snap.away_team}`;
+      if (!activeGameKeys.has(key)) continue; // skip non-slate games
       if (!gameMap[key]) gameMap[key] = [];
       gameMap[key].push(snap);
     }
 
     const results: any[] = [];
+    const skippedGames: string[] = [];
 
     for (const [gameKey, snaps] of Object.entries(gameMap)) {
       if (snaps.length < 2) continue;
@@ -106,11 +178,23 @@ serve(async (req) => {
       const [league, homeTeam, awayTeam] = gameKey.split("|");
       snaps.sort((a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime());
 
+      // ── Per-book: use OPENING + LATEST only ──────────────────
+      //    For movement analysis, we only need the first and last
+      //    snapshot per book. This prevents intermediate noise and
+      //    ensures "opening" is the true first line for this book
+      //    within the freshness window.
       const bookMap: Record<string, any[]> = {};
       for (const snap of snaps) {
         const bk = snap.bookmaker || "unknown";
         if (!bookMap[bk]) bookMap[bk] = [];
         bookMap[bk].push(snap);
+      }
+
+      // Trim each book to [first, last] — skip if only 1 snapshot
+      for (const [book, bookSnaps] of Object.entries(bookMap)) {
+        if (bookSnaps.length <= 1) continue;
+        // Keep only opening and latest — drop intermediate noise
+        bookMap[book] = [bookSnaps[0], bookSnaps[bookSnaps.length - 1]];
       }
 
       // ═══════════════════════════════════════════════════════════════════════
@@ -453,10 +537,6 @@ serve(async (req) => {
           sigType = "RLM_SPREAD";
           reasons.push(`Reverse line movement: ${booksAgreeingSpread} books against ${(homeBetsPct ?? 50) > 50 ? `${homeBetsPct}% public on ${homeTeam}` : `${awayBetsPct ?? 50}% public on ${awayTeam}`}.`);
           reasons.push(`Line: ${fmtSpread(openSpread)} → ${fmtSpread(currentSpread)}.`);
-        } else if (spreadSignal === "SHARP_ACCUM") {
-          score = 45;
-          sigType = "SHARP_ACCUMULATION";
-          reasons.push(`Gradual spread drift with sharp money alignment.`);
         } else if (spreadSignal === "SHADE") {
           score = 35;
           sigType = "BOOK_SHADE";
@@ -660,7 +740,19 @@ serve(async (req) => {
         alertType = "PUBLIC_DRIVEN";
         scenarioKey = `PUBLIC|${publicTeamName}|${absMove.toFixed(1)}pts`;
       }
-      // ── FROZEN LINE — ALL layers dead, no divergence, sufficient tracking ──
+      // ── WATCH — any minor activity ──
+      else if (bestOverall >= 1 || sharpDivergence) {
+        signalTier = "WATCH";
+        alertType = "WATCH";
+        const triggers: string[] = [];
+        if (spreadLayer.absMove >= 0.2) triggers.push(`spd${spreadLayer.absMove.toFixed(1)}`);
+        if (mlLayer.absMove >= mlMinorThreshold) triggers.push(`ml${mlLayer.absMove.toFixed(1)}%`);
+        if (totalLayer.hasMinorMove) triggers.push(`tot${totalLayer.absMove.toFixed(1)}`);
+        if (sharpDivergence) triggers.push(`div${divergenceGap.toFixed(0)}%`);
+        scenarioKey = `WATCH|${triggers.join("|")}`;
+      }
+      // ── FROZEN LINE — absolute last resort ──
+      // ALL three layers must be NONE, no divergence, 3h+ tracking
       else if (
         spreadSignal === "NONE" &&
         mlSignal === "NONE" &&
@@ -672,17 +764,6 @@ serve(async (req) => {
         signalTier = "FROZEN LINE";
         alertType = "FROZEN";
         scenarioKey = `FROZEN|${totalBooks}books|${hoursElapsed.toFixed(0)}h`;
-      }
-      // ── WATCH — any minor activity ──
-      else if (bestOverall >= 1 || sharpDivergence) {
-        signalTier = "WATCH";
-        alertType = "WATCH";
-        const triggers: string[] = [];
-        if (spreadLayer.absMove >= 0.2) triggers.push(`spd${spreadLayer.absMove.toFixed(1)}`);
-        if (mlLayer.absMove >= mlMinorThreshold) triggers.push(`ml${mlLayer.absMove.toFixed(1)}%`);
-        if (totalLayer.hasMinorMove) triggers.push(`tot${totalLayer.absMove.toFixed(1)}`);
-        if (sharpDivergence) triggers.push(`div${divergenceGap.toFixed(0)}%`);
-        scenarioKey = `WATCH|${triggers.join("|")}`;
       }
 
       if (!signalTier) continue;
@@ -816,6 +897,31 @@ serve(async (req) => {
       })();
 
       // ═══════════════════════════════════════════════════════════════════════
+      //  FROZEN SAFETY GUARD — absolute last-resort override
+      //
+      //  If ANY per-market read produced a non-PASS confidence, the game
+      //  has meaningful activity and must NOT be FROZEN.  Promote to WATCH.
+      // ═══════════════════════════════════════════════════════════════════════
+
+      if (signalTier === "FROZEN LINE") {
+        const anyNonPass =
+          sideRead.confidence !== "PASS" ||
+          totalRead.confidence !== "PASS" ||
+          mlRead.confidence !== "PASS";
+
+        if (anyNonPass) {
+          signalTier = "WATCH";
+          alertType = "WATCH";
+          // Build descriptive scenario key from what was actually found
+          const reasons: string[] = ["DEFROSTED"];
+          if (sideRead.confidence !== "PASS") reasons.push(`side:${sideRead.confidence}`);
+          if (totalRead.confidence !== "PASS") reasons.push(`tot:${totalRead.confidence}`);
+          if (mlRead.confidence !== "PASS") reasons.push(`ml:${mlRead.confidence}`);
+          scenarioKey = reasons.join("|");
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
       //  BUILD ALERT OUTPUT
       // ═══════════════════════════════════════════════════════════════════════
 
@@ -823,6 +929,7 @@ serve(async (req) => {
         home_team: homeTeam,
         away_team: awayTeam,
         league,
+        game_time: gameTimeMap[gameKey] ?? snaps[0].game_time ?? null,
         sharp_team: sharpTeam,
         fade_team: fadeTeam,
         signal_tier: signalTier,
@@ -894,7 +1001,20 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, alerts: results.length, results }),
+      JSON.stringify({
+        success: true,
+        alerts: results.length,
+        slate: {
+          slateStart,
+          slateEnd,
+          oddsWindowHours,
+          oddsWindowStart,
+          totalSlateGames: activeGameKeys.size,
+          processedGames: Object.keys(gameMap).length,
+          skippedGames: skippedGames.length > 0 ? skippedGames : undefined,
+        },
+        results,
+      }),
       { status: 200, headers: { ...cors, "Content-Type": "application/json" } }
     );
 

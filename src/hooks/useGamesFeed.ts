@@ -30,7 +30,8 @@ function deriveHsaStatus(narrative: string | null): HsaStatus {
   return 'narrative';
 }
 
-function deriveSignalTier(tier: string | null): SignalTier {
+/** Map a raw tier string to a valid SignalTier enum value. */
+function mapTierString(tier: string | null | undefined): SignalTier {
   if (!tier) return 'TRACKING';
 
   const map: Record<string, SignalTier> = {
@@ -42,6 +43,7 @@ function deriveSignalTier(tier: string | null): SignalTier {
     'STEAM MOVE': 'STEAM MOVE',
     'BOOK SHADE': 'BOOK SHADE',
     'FROZEN LINE': 'FROZEN LINE',
+    'SHARP ACCUMULATION': 'SHARP ACCUMULATION',
     'CONTRA MOVE': 'CONTRA MOVE',
     WATCH: 'WATCH',
     TRACKING: 'TRACKING',
@@ -53,6 +55,47 @@ function deriveSignalTier(tier: string | null): SignalTier {
   };
 
   return map[tier] ?? 'TRACKING';
+}
+
+/**
+ * Derive the display signal tier from an alert object.
+ *
+ * Priority:
+ *   1. Use overall_badge (new three-layer field) if present
+ *   2. Fall back to signal_tier (legacy field)
+ *   3. Fall back to tracked_games signal_tier
+ *
+ * FROZEN GUARD: If any per-market read has a non-PASS confidence,
+ * FROZEN LINE is overridden to WATCH. This prevents stale FROZEN
+ * rows or legacy data from showing FREEZE when real activity exists.
+ */
+function deriveSignalTier(alert: Record<string, any> | null, fallbackTier: string | null): SignalTier {
+  // Prefer overall_badge (written by the new three-layer engine)
+  // then signal_tier from alert, then fallback from tracked_games
+  const rawTier = alert?.overall_badge ?? alert?.signal_tier ?? fallbackTier ?? null;
+  const tier = mapTierString(rawTier);
+
+  // ── FROZEN GUARD ─────────────────────────────────────────────
+  // If the alert has per-market confidence data, check whether ANY
+  // market produced a non-PASS read. If so, FROZEN is invalid.
+  if (tier === 'FROZEN LINE' && alert) {
+    const sideConf = alert.side_confidence;
+    const totalConf = alert.total_confidence;
+    const mlConf = alert.ml_confidence;
+
+    // If we have per-market data and any is non-PASS → override FROZEN
+    const hasMarketData = sideConf || totalConf || mlConf;
+    if (hasMarketData) {
+      const anyNonPass =
+        (sideConf && sideConf !== 'PASS') ||
+        (totalConf && totalConf !== 'PASS') ||
+        (mlConf && mlConf !== 'PASS');
+
+      if (anyNonPass) return 'WATCH';
+    }
+  }
+
+  return tier;
 }
 
 function normalizeTeamName(name: string | null | undefined): string {
@@ -600,7 +643,7 @@ export function useGamesFeed() {
           gameTime: t.game_time,
           status,
           timeToTipMinutes: deriveTimeToTip(t.game_time),
-          signalTier: deriveSignalTier(alert?.signal_tier ?? t.signal_tier ?? null),
+          signalTier: deriveSignalTier(alert, t.signal_tier ?? null),
           sharpTeam: alert?.sharp_team ?? t.sharp_team ?? null,
           fadeTeam: alert?.fade_team ?? null,
           homeScore: espn?.homeScore ?? score?.home_score ?? null,
