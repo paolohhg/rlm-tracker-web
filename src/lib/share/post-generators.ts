@@ -171,13 +171,6 @@ export function generateSignalPost(game: GameView, options: SignalOptions): stri
     : 0;
   const hasTotalSignal = totalMove >= 0.5 && totalConf != null;
 
-  const confRank: Record<string, number> = { 'Very High': 5, 'High': 4, 'Elevated': 3, 'Moderate': 2, 'Low': 1 };
-  const sideRank = confRank[sideConfidence] ?? 0;
-  const totalRank = totalConf ? (confRank[totalConf] ?? 0) : 0;
-
-  // Show both side and total, but lead with whichever is stronger
-  const totalIsStronger = hasTotalSignal && totalRank > sideRank;
-
   // Matchup
   lines.push(`${game.awayTeam} @ ${game.homeTeam}`);
 
