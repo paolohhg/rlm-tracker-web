@@ -72,8 +72,11 @@ export interface GameView {
   outlierBookCount: number | null
 
   // Moneyline
+  openingMoneylineHome: number | null
+  openingMoneylineAway: number | null
   moneylineHome: number | null
   moneylineAway: number | null
+  mlMoveHome: number | null
 
   isLocked: boolean
   lastUpdated: string

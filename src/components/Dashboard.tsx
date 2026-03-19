@@ -621,6 +621,16 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
                 {game.moneylineHome > 0 ? '+' : ''}{game.moneylineHome}
               </span>
             </div>
+            {game.mlMoveHome != null && game.mlMoveHome !== 0 && (
+              <div style={{
+                color: Math.abs(game.mlMoveHome) >= 20 ? '#ff4d4d' : T.accent,
+                fontWeight: 600,
+                fontSize: '10px',
+                fontFamily: T.font,
+              }}>
+                {game.mlMoveHome > 0 ? '+' : ''}{game.mlMoveHome}¢
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ color: T.muted, fontSize: '13px', fontFamily: T.font }}>—</div>
@@ -790,6 +800,11 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
               <div style={{ color: game.moneylineHome < 0 ? T.text : T.textSecondary, fontWeight: game.moneylineHome < 0 ? 700 : 500, fontSize: '11px', fontFamily: T.font }}>
                 {game.moneylineHome > 0 ? '+' : ''}{game.moneylineHome}
               </div>
+              {game.mlMoveHome != null && game.mlMoveHome !== 0 && (
+                <div style={{ color: Math.abs(game.mlMoveHome) >= 20 ? '#ff4d4d' : T.accent, fontWeight: 600, fontSize: '9px', fontFamily: T.font }}>
+                  {game.mlMoveHome > 0 ? '+' : ''}{game.mlMoveHome}¢
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ color: T.muted, fontSize: '12px', fontFamily: T.font, marginTop: '2px' }}>—</div>

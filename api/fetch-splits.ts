@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const ACTION_NETWORK_API = 'https://api.actionnetwork.com/web/v1/scoreboard';
 const BOOK_IDS = '15,30,68,69,71,75,79'; // DraftKings, FanDuel, BetMGM, etc.
-const LEAGUES = ['ncaab', 'nba'] as const;
+const LEAGUES = ['ncaab', 'nba', 'nhl', 'mlb'] as const;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ function todayDate(): string {
 }
 
 function leagueLabel(league: string): string {
-  return league.toUpperCase() === 'NCAAB' ? 'NCAAB' : 'NBA';
+  return league.toUpperCase();
 }
 
 async function fetchLeagueSplits(league: string, date: string): Promise<SplitRow[]> {
