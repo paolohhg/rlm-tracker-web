@@ -76,23 +76,34 @@ function deriveSignalTier(alert: Record<string, any> | null, fallbackTier: strin
   const tier = mapTierString(rawTier);
 
   // ── FROZEN GUARD ─────────────────────────────────────────────
-  // If the alert has per-market confidence data, check whether ANY
-  // market produced a non-PASS read. If so, FROZEN is invalid.
-  if (tier === 'FROZEN LINE' && alert) {
+  // FROZEN LINE is only valid when ALL per-market reads are PASS.
+  // Two cases to handle:
+  //   1. Alert has per-market data → check confidences
+  //   2. Legacy alert (null three-layer fields) → distrust FROZEN entirely
+  if (tier === 'FROZEN LINE') {
+    if (!alert) {
+      // No alert at all, just a fallback tier string — can't verify, demote
+      return 'WATCH';
+    }
+
     const sideConf = alert.side_confidence;
     const totalConf = alert.total_confidence;
     const mlConf = alert.ml_confidence;
-
-    // If we have per-market data and any is non-PASS → override FROZEN
     const hasMarketData = sideConf || totalConf || mlConf;
-    if (hasMarketData) {
-      const anyNonPass =
-        (sideConf && sideConf !== 'PASS') ||
-        (totalConf && totalConf !== 'PASS') ||
-        (mlConf && mlConf !== 'PASS');
 
-      if (anyNonPass) return 'WATCH';
+    if (!hasMarketData) {
+      // Legacy alert row — three-layer fields are null.
+      // Cannot trust FROZEN classification from old engine. Demote to WATCH.
+      return 'WATCH';
     }
+
+    // Has per-market data: FROZEN only valid if ALL are PASS
+    const anyNonPass =
+      (sideConf && sideConf !== 'PASS') ||
+      (totalConf && totalConf !== 'PASS') ||
+      (mlConf && mlConf !== 'PASS');
+
+    if (anyNonPass) return 'WATCH';
   }
 
   return tier;
@@ -412,7 +423,7 @@ export function useGamesFeed() {
         espnGames,
       ] = await Promise.all([
         supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('game_time', { ascending: true }),
-        supabase.from('rlm_alerts').select('*').order('detected_at', { ascending: false }),
+        supabase.from('rlm_alerts').select('*').gte('detected_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()).order('detected_at', { ascending: false }),
         supabase.from('odds_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('fetched_at', { ascending: false }),
         supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
