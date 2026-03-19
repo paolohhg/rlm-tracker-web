@@ -2,7 +2,7 @@ export type GameStatus = 'upcoming' | 'live' | 'final'
 export type League = 'NBA' | 'NCAAB' | 'NHL' | 'MLB'
 export type Tournament = 'ncaa_tournament' | 'nit' | null
 export type HsaStatus = 'no_narrative' | 'narrative' | 'pending'
-export type SignalTier = 'DOUBLE NO-NARRATIVE RLM' | 'NO-NARRATIVE RLM' | 'STEAM MOVE' | 'BOOK SHADE' | 'FROZEN LINE' | 'CONTRA MOVE' | 'WATCH' | 'TRACKING' | null
+export type SignalTier = 'DOUBLE NO-NARRATIVE RLM' | 'NO-NARRATIVE RLM' | 'STEAM MOVE' | 'BOOK SHADE' | 'SHARP ACCUMULATION' | 'FROZEN LINE' | 'CONTRA MOVE' | 'WATCH' | 'TRACKING' | null
 
 export interface GameView {
   id: string
