@@ -674,6 +674,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // ── When force-refreshing, pull fresh odds first ──────────────
+    if (force) {
+      try {
+        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (supabaseUrl && serviceKey) {
+          await fetch(`${supabaseUrl}/functions/v1/fetch-odds`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${serviceKey}`,
+              'Content-Type': 'application/json',
+            },
+          });
+        }
+      } catch { /* non-critical — continue with existing data */ }
+    }
+
     // Fetch odds snapshots scoped to this specific game
     // Filter by league + game_time window to prevent cross-game contamination
     const gameTimeDate = new Date(game_time);
