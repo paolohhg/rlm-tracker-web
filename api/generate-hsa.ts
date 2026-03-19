@@ -67,6 +67,7 @@ Heard Sports Analysis
 HSI SIGNAL SUMMARY
 Reverse Line Movement: [Yes/No - if Yes, state which side the line moved TOWARD despite public on the other side, e.g. "Yes - line moved toward Warriors +7 despite 62% public on Celtics"]
 Steam Move: [Yes/No - if Yes, state the direction and magnitude, e.g. "Yes - 1.5-point move toward Under 218 in 20 minutes"]
+Velocity: [REQUIRED - State the exact velocity number from the data, e.g. "0.8 pts/hr" or "0 pts/hr (line frozen since open)". Always quote the pts/hr figure.]
 Book Alignment: [Describe book consensus or disagreement with specific direction, e.g. "All three books moved toward Hawks +3.5" or "DraftKings shading 1 point lower than FanDuel"]
 Public Bias: [REQUIRED FORMAT - Two parts separated by a pipe. Part 1: State public side with ticket %. Part 2: State the SHARP SIDE explicitly. Examples:
 "Public: 68% tickets on Celtics | Sharp side: Warriors +7.5 (reverse line movement + money divergence)"
@@ -87,7 +88,7 @@ Describe how sportsbooks reacted to market activity. Explain whether books appea
 Interpret ticket percentage vs money percentage. Identify any divergence between recreational betting patterns and larger wagers.
 
 4. Money Pattern
-Describe movement velocity and timing. Explain whether the movement appears to be gradual market pressure or a sharp steam move.
+ALWAYS state the exact velocity figure (X pts/hr) from the provided data. Describe movement velocity and timing. Classify the velocity: frozen (0 pts/hr), slow drift (<0.3 pts/hr), steady pressure (0.3-1.0 pts/hr), or sharp/steam (>1.0 pts/hr). Explain whether the movement appears to be gradual market pressure or a sharp steam move. If velocity is 0, explicitly note the line has been frozen and explain what that implies about book positioning.
 
 5. Market Lean
 State clearly which side the market pressure is pointing toward, including the specific team name and current number (e.g. "Market pressure points toward Team +7.5" or "Sportsbook adjustments lean toward the Under 218.5"). If the market shows no directional lean, state "PASS - market appears efficiently priced with no exploitable signal." This is a description of where sportsbooks are adjusting, NOT a wagering instruction.
@@ -96,7 +97,7 @@ State clearly which side the market pressure is pointing toward, including the s
 List factors that would strengthen or weaken the current market interpretation. Examples: line moving further in current direction, line reversing direction, public percentages shifting significantly, additional steam moves.
 
 7. Totals Intel
-Analyze totals market behavior separately. State the specific total number and whether sportsbook behavior leans Over or Under, with confidence level (Low / Moderate / High). If totals movement shows stronger signals than the spread, clearly state that. If no totals signal exists, say PASS.
+Analyze totals market behavior separately. State the specific total number and whether sportsbook behavior leans Over or Under, with confidence level (Low / Moderate / High). Include the totals velocity (pts/hr) and note the highest and lowest totals seen during tracking. If totals movement shows stronger signals than the spread, clearly state that. If no totals signal exists, say PASS.
 
 End with: Disclaimer: For research purposes only.
 
