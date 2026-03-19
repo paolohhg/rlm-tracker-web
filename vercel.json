@@ -1,8 +1,16 @@
 {
   "crons": [
     {
+      "path": "/api/fetch-odds",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/detect-rlm",
+      "schedule": "2/15 * * * *"
+    },
+    {
       "path": "/api/fetch-splits",
-      "schedule": "0 10 * * *"
+      "schedule": "5/30 * * * *"
     }
   ]
 }
