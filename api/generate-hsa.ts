@@ -693,11 +693,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Fetch odds snapshots scoped to this specific game
     // Filter by league + game_time window to prevent cross-game contamination
+    //
+    // IMPORTANT: Supabase default limit is 1000 rows. With 5+ books polling
+    // every 10 min over 24h, that's easily exceeded. To ensure we always
+    // get the LATEST snapshots, we:
+    //   1. Order descending (newest first)
+    //   2. Limit to 1000 (guaranteed to include current lines)
+    //   3. Reverse in-memory for the summarizer (expects ascending)
     const gameTimeDate = new Date(game_time);
     const windowStart = new Date(gameTimeDate.getTime() - 24 * 60 * 60 * 1000).toISOString();
     const windowEnd = new Date(gameTimeDate.getTime() + 4 * 60 * 60 * 1000).toISOString();
 
-    const { data: odds, error: oddsError } = await supabase
+    const { data: oddsDesc, error: oddsError } = await supabase
       .from('odds_snapshots')
       .select('*')
       .eq('league', league)
@@ -705,7 +712,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('away_team', away_team)
       .gte('game_time', windowStart)
       .lte('game_time', windowEnd)
-      .order('fetched_at', { ascending: true });
+      .order('fetched_at', { ascending: false })
+      .limit(1000);
+
+    // Reverse to ascending for summarizer (it expects chronological order)
+    const odds = oddsDesc ? [...oddsDesc].reverse() : null;
 
     if (oddsError) {
       return res.status(500).json({ error: 'Failed to fetch odds', detail: oddsError.message });
