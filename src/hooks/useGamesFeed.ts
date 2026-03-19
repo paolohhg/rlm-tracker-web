@@ -290,6 +290,8 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
     'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
     // groups=50 includes NCAA Tournament + NIT + CBI
     'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50',
+    'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard',
+    'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard',
   ];
 
   await Promise.all(urls.map(async (url) => {

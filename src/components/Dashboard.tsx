@@ -573,6 +573,31 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
         <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font }}>{spreadDisplay()}</div>
       </td>
 
+      {/* TOTAL */}
+      <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
+        {game.openingTotal != null || game.currentTotal != null ? (
+          <div>
+            <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font }}>
+              {game.openingTotal != null && game.currentTotal != null && game.openingTotal !== game.currentTotal
+                ? `${game.openingTotal} \u2192 ${game.currentTotal}`
+                : game.currentTotal ?? game.openingTotal ?? '—'}
+            </div>
+            {game.totalMove != null && game.totalMove !== 0 && (
+              <div style={{
+                color: Math.abs(game.totalMove) >= 1.5 ? '#ff4d4d' : T.accent,
+                fontWeight: 600,
+                fontSize: '10px',
+                fontFamily: T.font,
+              }}>
+                {game.totalMove > 0 ? '+' : ''}{game.totalMove}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ color: T.muted, fontSize: '13px', fontFamily: T.font }}>—</div>
+        )}
+      </td>
+
       {/* MOVE */}
       <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
         <div style={{
@@ -647,7 +672,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: T.font }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-            {['GAME', 'SPREAD', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', 'TIME', ''].map((col, i) => (
+            {['GAME', 'SPREAD', 'TOTAL', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', 'TIME', ''].map((col, i) => (
               <th key={col || `empty-${i}`} style={{
                 padding: '10px 8px',
                 textAlign: col === 'GAME' ? 'left' : col === 'TIME' ? 'right' : 'center',
@@ -714,13 +739,24 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
         </div>
       </div>
 
-      {/* Spread + move */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+      {/* Spread + Total + Move + Consensus */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginBottom: '10px' }}>
         <div>
           <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>Spread</div>
           <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font, marginTop: '2px' }}>
             {game.currentSpread != null ? game.currentSpread : '—'}
           </div>
+        </div>
+        <div>
+          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>Total</div>
+          <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font, marginTop: '2px' }}>
+            {game.currentTotal != null ? game.currentTotal : '—'}
+          </div>
+          {game.totalMove != null && game.totalMove !== 0 && (
+            <div style={{ color: Math.abs(game.totalMove) >= 1.5 ? '#ff4d4d' : T.accent, fontWeight: 600, fontSize: '10px', fontFamily: T.font }}>
+              {game.totalMove > 0 ? '+' : ''}{game.totalMove}
+            </div>
+          )}
         </div>
         <div>
           <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>Move</div>
