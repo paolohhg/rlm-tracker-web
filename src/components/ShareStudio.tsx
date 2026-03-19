@@ -5,6 +5,7 @@ import {
   generateSignalPost,
   generateExplainMove,
   deriveConfidenceLabel,
+  deriveTotalConfidenceLabel,
   DEFAULT_ALERT_OPTIONS,
   DEFAULT_SIGNAL_OPTIONS,
 } from '../lib/share/post-generators';
@@ -158,6 +159,39 @@ function renderCardToCanvas(
     ctx.font = `500 22px ${FONT}`;
     ctx.textBaseline = 'top';
     ctx.fillText(dataItems.join('   •   '), PAD, dataY);
+    dataY += 36;
+  }
+
+  // ── Total movement ──
+  if (game.openingTotal != null && game.currentTotal != null && Math.abs(game.currentTotal - game.openingTotal) >= 0.5) {
+    const totalDir = game.currentTotal > game.openingTotal ? 'Over' : 'Under';
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = `600 28px ${FONT}`;
+    ctx.textBaseline = 'top';
+    const totalStr = `Total: ${game.openingTotal} \u2192 ${game.currentTotal}`;
+    ctx.fillText(totalStr, PAD, dataY);
+
+    const totalW = ctx.measureText(totalStr).width;
+    ctx.fillStyle = '#64748b';
+    ctx.font = `400 22px ${FONT}`;
+    ctx.fillText(`  (moving ${totalDir})`, PAD + totalW, dataY + 4);
+    dataY += 40;
+
+    // Total confidence + splits
+    const totalDataItems: string[] = [];
+    if (game.overTicketPct != null && game.underTicketPct != null) {
+      totalDataItems.push(`O/U Tickets: ${game.overTicketPct}% / ${game.underTicketPct}%`);
+    }
+    const totalConf = deriveTotalConfidenceLabel(game);
+    if (totalConf) {
+      totalDataItems.push(`Total Confidence: ${totalConf}`);
+    }
+    if (totalDataItems.length > 0) {
+      ctx.fillStyle = '#64748b';
+      ctx.font = `500 22px ${FONT}`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(totalDataItems.join('   •   '), PAD, dataY);
+    }
   }
 
   // ── Footer ──

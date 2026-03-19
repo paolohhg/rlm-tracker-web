@@ -58,6 +58,25 @@ export function deriveConfidenceLabel(signalTier: SignalTier): string {
   }
 }
 
+export function deriveTotalConfidenceLabel(game: GameView): string | null {
+  if (game.openingTotal == null || game.currentTotal == null) return null;
+  const totalMove = Math.abs(game.currentTotal - game.openingTotal);
+  const hasOverUnderSplit = game.overTicketPct != null && game.underTicketPct != null;
+  const hasOverUnderMoney = game.overMoneyPct != null && game.underMoneyPct != null;
+
+  // Reverse total movement (line moving opposite to public) = stronger signal
+  const isReverse = hasOverUnderSplit && (
+    (game.currentTotal > game.openingTotal && game.underTicketPct! > game.overTicketPct!) ||
+    (game.currentTotal < game.openingTotal && game.overTicketPct! > game.underTicketPct!)
+  );
+
+  if (totalMove >= 2 && isReverse) return 'High';
+  if (totalMove >= 1.5 && isReverse) return 'Elevated';
+  if (totalMove >= 1 || (totalMove >= 0.5 && (hasOverUnderMoney || hasOverUnderSplit))) return 'Moderate';
+  if (totalMove >= 0.5) return 'Low';
+  return null;
+}
+
 function signalTierLabel(tier: SignalTier): string {
   switch (tier) {
     case 'DOUBLE NO-NARRATIVE RLM': return 'Double RLM';
@@ -101,6 +120,23 @@ export function generateAlertPost(game: GameView, options: AlertOptions): string
 
   if (options.showBookCount && game.booksAgreeing != null && game.totalBooks != null) {
     lines.push(`Books moving: ${game.booksAgreeing}/${game.totalBooks}`);
+  }
+
+  // Total movement
+  if (game.openingTotal != null && game.currentTotal != null && Math.abs(game.currentTotal - game.openingTotal) >= 0.5) {
+    lines.push('');
+    const totalDir = game.currentTotal > game.openingTotal ? 'Over' : 'Under';
+    lines.push(`Total: ${game.openingTotal} \u2192 ${game.currentTotal} (moving ${totalDir})`);
+    if (game.overTicketPct != null && game.underTicketPct != null) {
+      lines.push(`Over/Under Tickets: ${game.overTicketPct}% / ${game.underTicketPct}%`);
+    }
+    if (game.overMoneyPct != null && game.underMoneyPct != null) {
+      lines.push(`Over/Under Money: ${game.overMoneyPct}% / ${game.underMoneyPct}%`);
+    }
+    const totalConf = deriveTotalConfidenceLabel(game);
+    if (totalConf) {
+      lines.push(`Total Confidence: ${totalConf}`);
+    }
   }
 
   // Signal description
@@ -153,10 +189,28 @@ export function generateSignalPost(game: GameView, options: SignalOptions): stri
     }
   }
 
-  // Confidence
+  // Confidence — side
   if (options.showConfidence && game.signalTier) {
     lines.push('');
-    lines.push(`Confidence: ${deriveConfidenceLabel(game.signalTier)}`);
+    lines.push(`Side Confidence: ${deriveConfidenceLabel(game.signalTier)}`);
+  }
+
+  // Total data
+  if (game.openingTotal != null && game.currentTotal != null && Math.abs(game.currentTotal - game.openingTotal) >= 0.5) {
+    lines.push('');
+    const totalDir = game.currentTotal > game.openingTotal ? 'Over' : 'Under';
+    lines.push(`Total: ${game.openingTotal} \u2192 ${game.currentTotal} (${totalDir})`);
+    if (options.showSupportingData) {
+      if (game.overTicketPct != null && game.underTicketPct != null) {
+        lines.push(`O/U Tickets: ${game.overTicketPct}% / ${game.underTicketPct}%`);
+      }
+    }
+    if (options.showConfidence) {
+      const totalConf = deriveTotalConfidenceLabel(game);
+      if (totalConf) {
+        lines.push(`Total Confidence: ${totalConf}`);
+      }
+    }
   }
 
   lines.push('');
