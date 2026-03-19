@@ -17,12 +17,15 @@ serve(async (req) => {
 
     const now = new Date();
     const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    // Only process games that haven't tipped off yet (with 4h buffer for live games)
+    const tipoffCutoff = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
 
-    // Get all upcoming games from odds_snapshots directly
+    // Get upcoming/recent games from odds_snapshots (skip games already tipped off)
     const { data: recentOdds, error } = await supabase
       .from("odds_snapshots")
       .select("*")
       .gte("fetched_at", windowStart)
+      .gte("game_time", tipoffCutoff)
       .order("fetched_at", { ascending: true });
 
     if (error) throw error;
@@ -248,6 +251,9 @@ serve(async (req) => {
         scenarioKey = `DOUBLE_RLM|${booksAgreeing}books|${absMove.toFixed(1)}pts`;
       }
 
+      // Get game_time from the most recent snapshot for this game
+      const gameTime = snaps[snaps.length - 1]?.game_time ?? null;
+
       const alert: Record<string, unknown> = {
         home_team: homeTeam,
         away_team: awayTeam,
@@ -264,6 +270,7 @@ serve(async (req) => {
         velocity_per_hour: parseFloat(velocityPerHour.toFixed(2)),
         hsa_narrative: hsaNarrative,
         detected_at: now.toISOString(),
+        game_time: gameTime,
       };
 
       // Add moneyline movement for ML-primary sports (NHL/MLB)

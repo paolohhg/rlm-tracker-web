@@ -189,12 +189,14 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Get all alerts that need scoring (detected in last 24h)
+    // Get alerts for upcoming/live games only (game_time within 4h past to future)
+    const tipoffCutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
     const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: alerts, error: alertErr } = await supabase
       .from("rlm_alerts")
       .select("*")
-      .gte("detected_at", windowStart);
+      .gte("detected_at", windowStart)
+      .or(`game_time.gte.${tipoffCutoff},game_time.is.null`);
 
     if (alertErr) throw alertErr;
     if (!alerts || alerts.length === 0) {
