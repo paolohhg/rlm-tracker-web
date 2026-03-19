@@ -543,14 +543,14 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
         borderBottom: `1px solid ${T.border}`,
       }}
     >
-      {/* GAME */}
+      {/* GAME + TIME/STATUS */}
       <td style={{ padding: '12px 12px', verticalAlign: 'middle' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center', minWidth: '28px' }}>
             <TeamBadge league={game.league} teamName={game.awayTeam} ncaabLogos={ncaabLogos} size={22} />
             <TeamBadge league={game.league} teamName={game.homeTeam} ncaabLogos={ncaabLogos} size={22} />
           </div>
-          <div>
+          <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ color: T.text, fontWeight: 600, fontSize: '13px', fontFamily: T.font }}>{game.awayTeam}</span>
               {game.status !== 'upcoming' && game.awayScore != null && (
@@ -563,12 +563,22 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
                 <span style={{ color: game.status === 'live' ? '#22c55e' : T.text, fontWeight: 800, fontSize: '14px', fontFamily: T.font }}>{game.homeScore}</span>
               )}
             </div>
-            <div style={{ color: T.muted, fontSize: '10px', fontWeight: 500, marginTop: '2px', fontFamily: T.font }}>{game.league}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+              <span style={{ color: T.muted, fontSize: '10px', fontWeight: 500, fontFamily: T.font }}>{game.league}</span>
+              <span style={{ color: statusColor(game.status), fontWeight: 700, fontSize: '10px', fontFamily: T.font }}>
+                {statusLabel(game)}
+              </span>
+              {game.status === 'upcoming' && (
+                <span style={{ color: T.muted, fontSize: '10px', fontFamily: T.font }}>
+                  {formatGameTime(game.gameTime)}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </td>
 
-      {/* SPREAD */}
+      {/* SPREAD / LIVE SPREAD */}
       <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
         <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font }}>{spreadDisplay()}</div>
       </td>
@@ -627,18 +637,6 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
         <IntelBadges game={game} />
       </td>
 
-      {/* TIME */}
-      <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'right' }}>
-        <div style={{ color: statusColor(game.status), fontWeight: 700, fontSize: '12px', fontFamily: T.font, whiteSpace: 'nowrap' }}>
-          {statusLabel(game)}
-        </div>
-        {game.status === 'upcoming' && (
-          <div style={{ color: T.muted, fontSize: '10px', fontFamily: T.font, marginTop: '2px' }}>
-            {formatGameTime(game.gameTime)}
-          </div>
-        )}
-      </td>
-
       {/* SHARE — pregame only */}
       <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
         <button
@@ -672,10 +670,10 @@ function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: T.font }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-            {['GAME', 'SPREAD', 'TOTAL', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', 'TIME', ''].map((col, i) => (
+            {['GAME', 'SPREAD', 'TOTAL', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', ''].map((col, i) => (
               <th key={col || `empty-${i}`} style={{
                 padding: '10px 8px',
-                textAlign: col === 'GAME' ? 'left' : col === 'TIME' ? 'right' : 'center',
+                textAlign: col === 'GAME' ? 'left' : 'center',
                 color: T.muted,
                 fontSize: '10px',
                 fontWeight: 700,
@@ -711,44 +709,49 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
         cursor: 'pointer',
       }}
     >
-      {/* Header: matchup + status */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
-            <TeamBadge league={game.league} teamName={game.awayTeam} ncaabLogos={ncaabLogos} size={26} />
-            <TeamBadge league={game.league} teamName={game.homeTeam} ncaabLogos={ncaabLogos} size={26} />
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: T.text, fontWeight: 600, fontSize: '14px', fontFamily: T.font }}>{game.awayTeam}</span>
-              {game.status !== 'upcoming' && game.awayScore != null && (
-                <span style={{ color: game.status === 'live' ? '#22c55e' : T.text, fontWeight: 800, fontSize: '16px' }}>{game.awayScore}</span>
-              )}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: T.text, fontWeight: 600, fontSize: '14px', fontFamily: T.font }}>{game.homeTeam}</span>
-              {game.status !== 'upcoming' && game.homeScore != null && (
-                <span style={{ color: game.status === 'live' ? '#22c55e' : T.text, fontWeight: 800, fontSize: '16px' }}>{game.homeScore}</span>
-              )}
-            </div>
-            <div style={{ color: T.muted, fontSize: '10px', fontWeight: 500, marginTop: '2px', fontFamily: T.font }}>{game.league}</div>
-          </div>
+      {/* Header: matchup + scores + status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
+          <TeamBadge league={game.league} teamName={game.awayTeam} ncaabLogos={ncaabLogos} size={26} />
+          <TeamBadge league={game.league} teamName={game.homeTeam} ncaabLogos={ncaabLogos} size={26} />
         </div>
-        <div style={{ color: statusColor(game.status), fontWeight: 700, fontSize: '11px', fontFamily: T.font, textAlign: 'right', whiteSpace: 'nowrap' }}>
-          {statusLabel(game)}
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ color: T.text, fontWeight: 600, fontSize: '14px', fontFamily: T.font }}>{game.awayTeam}</span>
+            {game.status !== 'upcoming' && game.awayScore != null && (
+              <span style={{ color: game.status === 'live' ? '#22c55e' : T.text, fontWeight: 800, fontSize: '16px' }}>{game.awayScore}</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ color: T.text, fontWeight: 600, fontSize: '14px', fontFamily: T.font }}>{game.homeTeam}</span>
+            {game.status !== 'upcoming' && game.homeScore != null && (
+              <span style={{ color: game.status === 'live' ? '#22c55e' : T.text, fontWeight: 800, fontSize: '16px' }}>{game.homeScore}</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+            <span style={{ color: T.muted, fontSize: '10px', fontWeight: 500, fontFamily: T.font }}>{game.league}</span>
+            <span style={{ color: statusColor(game.status), fontWeight: 700, fontSize: '10px', fontFamily: T.font }}>
+              {statusLabel(game)}
+            </span>
+            {game.status === 'upcoming' && (
+              <span style={{ color: T.muted, fontSize: '10px', fontFamily: T.font }}>
+                {formatGameTime(game.gameTime)}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Spread + Total + Move + Consensus */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginBottom: '10px' }}>
         <div>
-          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>Spread</div>
+          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>{game.status === 'live' ? 'Live Spread' : 'Spread'}</div>
           <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font, marginTop: '2px' }}>
             {game.currentSpread != null ? game.currentSpread : '—'}
           </div>
         </div>
         <div>
-          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>Total</div>
+          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>{game.status === 'live' ? 'Live Total' : 'Total'}</div>
           <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font, marginTop: '2px' }}>
             {game.currentTotal != null ? game.currentTotal : '—'}
           </div>
