@@ -23,6 +23,21 @@ function median(arr: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
+/** Format spread for display: +3.5 or -7 */
+function fmtSpread(n: number | null): string {
+  if (n == null) return "—";
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+type Confidence = "PASS" | "LOW" | "MODERATE" | "HIGH";
+
+function scoreToConfidence(score: number): Confidence {
+  if (score >= 70) return "HIGH";
+  if (score >= 40) return "MODERATE";
+  if (score >= 15) return "LOW";
+  return "PASS";
+}
+
 /** Build a scenario key string for rich logging. */
 function buildScenarioKey(
   prefix: string,
@@ -36,6 +51,15 @@ function buildScenarioKey(
   if (ml.absMove >= 0.5) parts.push(`ml${ml.absMove.toFixed(1)}%`);
   if (total.absMove >= 0.5) parts.push(`tot${total.absMove.toFixed(1)}`);
   return parts.join("|");
+}
+
+// ── Per-market read types ────────────────────────────────────────────────────
+
+interface MarketRead {
+  lean: string;        // e.g. "Nebraska -13.5", "Under 161.5", "TCU ML", "PASS"
+  confidence: Confidence;
+  signal_type: string; // e.g. "RLM_SPREAD", "PUBLIC_DRIVEN", "STEAM_TOTAL", "NO_EDGE"
+  summary_reason: string;
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
@@ -52,7 +76,6 @@ serve(async (req) => {
     const now = new Date();
     const windowStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Get all recent odds snapshots
     const { data: recentOdds, error } = await supabase
       .from("odds_snapshots")
       .select("*")
@@ -67,7 +90,7 @@ serve(async (req) => {
       );
     }
 
-    // Group by game key (league|home_team|away_team)
+    // Group by game key
     const gameMap: Record<string, any[]> = {};
     for (const snap of recentOdds) {
       const key = `${snap.league}|${snap.home_team}|${snap.away_team}`;
@@ -81,11 +104,8 @@ serve(async (req) => {
       if (snaps.length < 2) continue;
 
       const [league, homeTeam, awayTeam] = gameKey.split("|");
-
-      // Sort by time
       snaps.sort((a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime());
 
-      // Group by bookmaker
       const bookMap: Record<string, any[]> = {};
       for (const snap of snaps) {
         const bk = snap.bookmaker || "unknown";
@@ -114,15 +134,12 @@ serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════════
       //  LAYER 2: MONEYLINE MOVEMENT PER BOOK (implied probability)
       //
-      //  We track how each book's HOME implied probability changed.
-      //  Delta > 0 means home team became MORE favored.
-      //  Delta < 0 means away team became MORE favored.
-      //  Using implied probability normalizes across favorites/underdogs
-      //  so +130→+114 is treated proportionally to -150→-170.
+      //  Delta > 0 = home became MORE favored.
+      //  Delta < 0 = away became MORE favored.
       // ═══════════════════════════════════════════════════════════════════════
 
-      const mlProbDeltas: number[] = []; // implied probability change per book (in percentage points)
-      const mlRawMovements: number[] = []; // raw cents change for output display
+      const mlProbDeltas: number[] = [];
+      const mlRawMovements: number[] = [];
       const bookMLs: { openML: number; currML: number; openProb: number; currProb: number; book: string }[] = [];
 
       for (const [book, bookSnaps] of Object.entries(bookMap)) {
@@ -132,7 +149,6 @@ serve(async (req) => {
         if (openML != null && currML != null) {
           const openProb = americanToImpliedProb(openML);
           const currProb = americanToImpliedProb(currML);
-          // Delta in percentage points (e.g., 60% → 63% = +3.0)
           const probDelta = parseFloat(((currProb - openProb) * 100).toFixed(2));
           mlProbDeltas.push(probDelta);
           mlRawMovements.push(parseFloat((currML - openML).toFixed(0)));
@@ -159,7 +175,7 @@ serve(async (req) => {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      //  CONSENSUS CALCULATIONS (median across books)
+      //  CONSENSUS CALCULATIONS
       // ═══════════════════════════════════════════════════════════════════════
 
       const isMLPrimary = league === "NHL" || league === "MLB";
@@ -170,8 +186,8 @@ serve(async (req) => {
       if (!hasSpreadData && !hasMLData) continue;
 
       const consensusMove = median(bookMovements);
-      const consensusMLProbDelta = median(mlProbDeltas); // in implied probability percentage points
-      const consensusMLRaw = median(mlRawMovements); // raw cents for display
+      const consensusMLProbDelta = median(mlProbDeltas);
+      const consensusMLRaw = median(mlRawMovements);
       const consensusTotalMove = median(totalMovements);
 
       const absMove = Math.abs(consensusMove);
@@ -180,21 +196,13 @@ serve(async (req) => {
 
       // ═══════════════════════════════════════════════════════════════════════
       //  LEAGUE-AWARE THRESHOLDS
-      //
-      //  ML thresholds are now in implied probability percentage points:
-      //    2.0% ≈ +130→+114 (16 cents for underdog)
-      //    2.0% ≈ -150→-170 (20 cents for favorite)
-      //  This normalizes across favorites and underdogs.
       // ═══════════════════════════════════════════════════════════════════════
 
       const spreadThreshold = isMLPrimary ? 0.3 : 0.5;
-      // ML thresholds in implied probability points
-      const mlThreshold = isMLPrimary ? 1.5 : 2.0;       // meaningful move
-      const mlMinorThreshold = isMLPrimary ? 0.8 : 1.0;   // minor move (blocks FROZEN)
-      const mlSteamThreshold = isMLPrimary ? 3.0 : 4.0;   // steam-level velocity
+      const mlThreshold = isMLPrimary ? 1.5 : 2.0;
+      const mlMinorThreshold = isMLPrimary ? 0.8 : 1.0;
       const totalThreshold = isMLPrimary ? 0.5 : 1.0;
 
-      // Books agreeing per layer
       const booksAgreeingSpread = hasSpreadData
         ? bookMovements.filter(m => Math.sign(m) === Math.sign(consensusMove) && Math.abs(m) >= spreadThreshold).length
         : 0;
@@ -215,18 +223,20 @@ serve(async (req) => {
       const lastSnap = snaps[snaps.length - 1];
       const hoursElapsed = (new Date(lastSnap.fetched_at).getTime() - new Date(firstSnap.fetched_at).getTime()) / (1000 * 60 * 60);
       const spreadVelocity = hoursElapsed > 0 ? absMove / hoursElapsed : 0;
-      const mlVelocity = hoursElapsed > 0 ? absMLProbDelta / hoursElapsed : 0;     // prob points per hour
+      const mlVelocity = hoursElapsed > 0 ? absMLProbDelta / hoursElapsed : 0;
       const totalVelocity = hoursElapsed > 0 ? absTotalMove / hoursElapsed : 0;
 
       // ═══════════════════════════════════════════════════════════════════════
-      //  SPLITS FETCH — Sharp divergence detection
+      //  SPLITS FETCH
       // ═══════════════════════════════════════════════════════════════════════
 
       let sharpDivergence = false;
       let sharpSide: string | null = null;
       let homeBetsPct: number | null = null;
       let homeMoneyPct: number | null = null;
-      let divergenceGap = 0; // magnitude of money%-bets% gap
+      let awayBetsPct: number | null = null;
+      let awayMoneyPct: number | null = null;
+      let divergenceGap = 0;
 
       try {
         const { data: splitsRows } = await supabase
@@ -242,12 +252,11 @@ serve(async (req) => {
           const s = splitsRows[0];
           homeBetsPct = s.home_ticket_pct;
           homeMoneyPct = s.home_money_pct;
-          const awayBetsPct = s.away_ticket_pct ?? (100 - (homeBetsPct ?? 50));
-          const awayMoneyPct = s.away_money_pct ?? (100 - (homeMoneyPct ?? 50));
+          awayBetsPct = s.away_ticket_pct ?? (100 - (homeBetsPct ?? 50));
+          awayMoneyPct = s.away_money_pct ?? (100 - (homeMoneyPct ?? 50));
 
-          // Sharp divergence: money% leads bets% by >= 8 points on either side
           const homeDivergence = (homeMoneyPct ?? 0) - (homeBetsPct ?? 0);
-          const awayDivergence = awayMoneyPct - awayBetsPct;
+          const awayDivergence = (awayMoneyPct ?? 0) - (awayBetsPct ?? 0);
           divergenceGap = Math.max(Math.abs(homeDivergence), Math.abs(awayDivergence));
 
           if (divergenceGap >= 8) {
@@ -255,14 +264,33 @@ serve(async (req) => {
             sharpSide = homeDivergence > awayDivergence ? homeTeam : awayTeam;
           }
         }
-      } catch { /* splits fetch is non-critical */ }
+      } catch { /* non-critical */ }
 
       // ═══════════════════════════════════════════════════════════════════════
-      //  THREE INDEPENDENT SIGNAL LAYER OBJECTS
+      //  PUBLIC DIRECTION DETECTION
       //
-      //  Each layer is evaluated on its own merits. The final classification
-      //  picks the strongest signal across all layers. No single layer being
-      //  quiet can suppress a real signal from another layer.
+      //  Determine which side the public is on (by ticket %).
+      //  Then check if spread movement is WITH or AGAINST public.
+      //  Movement WITH public = PUBLIC_DRIVEN (no sharp edge)
+      //  Movement AGAINST public = potential RLM
+      // ═══════════════════════════════════════════════════════════════════════
+
+      // Public side: the team with >50% of tickets
+      const publicOnHome = (homeBetsPct ?? 50) > 50;
+      const publicTeamName = publicOnHome ? homeTeam : awayTeam;
+
+      // Did spread move toward public side?
+      // consensusMove < 0 → line moved toward home being more favored
+      // consensusMove > 0 → line moved toward away being more favored
+      const spreadMovedTowardHome = consensusMove < 0;
+      const spreadMovedWithPublic = hasSpreadData && absMove >= 0.2 &&
+        ((publicOnHome && spreadMovedTowardHome) || (!publicOnHome && !spreadMovedTowardHome));
+
+      // Is spread movement AGAINST public? (RLM indicator)
+      const spreadAgainstPublic = hasSpreadData && absMove >= 0.2 && !spreadMovedWithPublic;
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //  THREE SIGNAL LAYER OBJECTS
       // ═══════════════════════════════════════════════════════════════════════
 
       const spreadLayer = {
@@ -277,9 +305,9 @@ serve(async (req) => {
       const mlLayer = {
         hasMeaningfulMove: absMLProbDelta >= mlThreshold,
         hasMinorMove: absMLProbDelta >= mlMinorThreshold,
-        move: consensusMLProbDelta,       // implied prob delta (positive = home improving)
-        rawMove: consensusMLRaw,          // raw cents for display
-        absMove: absMLProbDelta,          // absolute implied prob delta
+        move: consensusMLProbDelta,
+        rawMove: consensusMLRaw,
+        absMove: absMLProbDelta,
         booksAgreeing: booksAgreeingML,
         velocity: mlVelocity,
       };
@@ -296,45 +324,52 @@ serve(async (req) => {
       // ═══════════════════════════════════════════════════════════════════════
       //  PER-LAYER SIGNAL EVALUATION
       //
-      //  Each layer independently determines if it carries:
-      //    - STEAM: high velocity + 3+ books
-      //    - RLM: meaningful move + 3+ books (but not steam velocity)
-      //    - SHARP_ACCUM: gradual move + splits alignment
-      //    - SHADE: meaningful move but only 1-2 books
-      //    - MINOR: some movement but below meaningful threshold
-      //    - NONE: no meaningful activity
+      //  Now includes PUBLIC_DRIVEN: when movement is WITH public and
+      //  there's no sharp divergence confirming the move.
+      //
+      //  Priority: STEAM > RLM > SHARP_ACCUM > SHADE > PUBLIC_DRIVEN > MINOR > NONE
       // ═══════════════════════════════════════════════════════════════════════
 
-      type LayerSignal = "STEAM" | "RLM" | "SHARP_ACCUM" | "SHADE" | "MINOR" | "NONE";
+      type LayerSignal = "STEAM" | "RLM" | "SHARP_ACCUM" | "SHADE" | "PUBLIC_DRIVEN" | "MINOR" | "NONE";
 
       // ── Spread layer signal ──
       let spreadSignal: LayerSignal = "NONE";
       if (spreadLayer.hasMeaningfulMove) {
-        if (spreadLayer.booksAgreeing >= 3 && spreadLayer.velocity >= 0.5) {
+        if (spreadMovedWithPublic && !sharpDivergence) {
+          // Movement is WITH public, no sharp confirmation → PUBLIC_DRIVEN
+          spreadSignal = "PUBLIC_DRIVEN";
+        } else if (spreadLayer.booksAgreeing >= 3 && spreadLayer.velocity >= 0.5) {
           spreadSignal = "STEAM";
         } else if (spreadLayer.booksAgreeing >= 3) {
           spreadSignal = "RLM";
         } else if (spreadLayer.booksAgreeing >= 1) {
           spreadSignal = "SHADE";
+        } else {
+          // Meaningful move but can't confirm direction → still note it
+          spreadSignal = "MINOR";
         }
       } else if (spreadLayer.hasMinorMove) {
-        spreadSignal = "MINOR";
+        if (spreadMovedWithPublic && !sharpDivergence) {
+          spreadSignal = "PUBLIC_DRIVEN";
+        } else {
+          spreadSignal = "MINOR";
+        }
       }
 
       // ── ML layer signal ──
       let mlSignal: LayerSignal = "NONE";
       if (mlLayer.hasMeaningfulMove) {
-        // ML steam: high velocity + multiple books
-        const mlSteamVelocity = isMLPrimary ? 1.5 : 2.0; // prob pts/hr
+        const mlSteamVelocity = isMLPrimary ? 1.5 : 2.0;
         if (mlLayer.booksAgreeing >= 3 && mlLayer.velocity >= mlSteamVelocity) {
           mlSignal = "STEAM";
         } else if (mlLayer.booksAgreeing >= 3) {
           mlSignal = "RLM";
         } else if (mlLayer.booksAgreeing >= 1) {
           mlSignal = "SHADE";
+        } else {
+          mlSignal = "MINOR";
         }
       } else if (mlLayer.hasMinorMove) {
-        // Check for sharp accumulation: gradual ML drift, especially with splits confirmation
         const mlMovingTowardSharp = sharpSide
           ? (sharpSide === homeTeam && consensusMLProbDelta > 0) ||
             (sharpSide === awayTeam && consensusMLProbDelta < 0)
@@ -343,7 +378,6 @@ serve(async (req) => {
         if (mlMovingTowardSharp && sharpDivergence) {
           mlSignal = "SHARP_ACCUM";
         } else if (absMLProbDelta >= mlMinorThreshold) {
-          // Even without splits: ML is moving and that's not nothing
           mlSignal = "MINOR";
         }
       }
@@ -351,11 +385,11 @@ serve(async (req) => {
       // ── Totals layer signal ──
       let totalSignal: LayerSignal = "NONE";
       if (totalLayer.hasMeaningfulMove) {
-        const totalSteamVelocity = isMLPrimary ? 0.5 : 1.0; // pts/hr
+        const totalSteamVelocity = isMLPrimary ? 0.5 : 1.0;
         if (totalLayer.booksAgreeing >= 3 && totalLayer.velocity >= totalSteamVelocity) {
           totalSignal = "STEAM";
         } else if (totalLayer.booksAgreeing >= 2) {
-          totalSignal = "SHADE"; // coordinated total move
+          totalSignal = "SHADE";
         } else {
           totalSignal = "MINOR";
         }
@@ -364,28 +398,211 @@ serve(async (req) => {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      //  COMPOSITE SIGNAL CLASSIFICATION
+      //  PER-MARKET STRUCTURED READS
       //
-      //  The strongest signal across any layer wins. A quiet spread layer
-      //  CANNOT suppress a real ML signal or vice versa.
-      //
-      //  Priority: STEAM > RLM > SHARP_ACCUM > SHADE > WATCH > FROZEN
-      //
-      //  `signal_tier` = display-facing tier (what the dashboard shows)
-      //  `alert_type`  = granular type (which layer + type, e.g. RLM_ML)
+      //  Each market produces its own lean/confidence/signal_type/summary.
+      //  These are INDEPENDENT — a quiet spread cannot erase a meaningful
+      //  total or ML read.
       // ═══════════════════════════════════════════════════════════════════════
 
-      let signalTier = "";
-      let alertType = "";
-      let scenarioKey = "";
+      // Consensus averages for display
+      const openSpread = hasSpreadData
+        ? parseFloat((bookSpreads.reduce((s, b) => s + b.open, 0) / bookSpreads.length).toFixed(1))
+        : null;
+      const currentSpread = hasSpreadData
+        ? parseFloat((bookSpreads.reduce((s, b) => s + b.current, 0) / bookSpreads.length).toFixed(1))
+        : null;
+      const openTotal = hasTotalData
+        ? parseFloat((bookTotals.reduce((s, b) => s + b.open, 0) / bookTotals.length).toFixed(1))
+        : null;
+      const currentTotal = hasTotalData
+        ? parseFloat((bookTotals.reduce((s, b) => s + b.current, 0) / bookTotals.length).toFixed(1))
+        : null;
+      const avgOpenMLHome = bookMLs.length > 0
+        ? parseFloat((bookMLs.reduce((s, b) => s + b.openML, 0) / bookMLs.length).toFixed(0))
+        : null;
+      const avgCurrMLHome = bookMLs.length > 0
+        ? parseFloat((bookMLs.reduce((s, b) => s + b.currML, 0) / bookMLs.length).toFixed(0))
+        : null;
 
-      // Determine which layer is the primary signal source
+      // ── SIDE / SPREAD market read ──
+      const sideRead: MarketRead = (() => {
+        // Determine which team the spread lean is toward
+        // consensusMove < 0 → home becoming more favored → lean home side
+        // consensusMove > 0 → away becoming more favored → lean away side
+        const leanTeam = consensusMove < 0 ? homeTeam : awayTeam;
+        const leanSpread = currentSpread != null
+          ? `${leanTeam} ${fmtSpread(consensusMove < 0 ? currentSpread : -(currentSpread ?? 0))}`
+          : leanTeam;
+
+        if (spreadSignal === "NONE" && !spreadLayer.hasMinorMove) {
+          return { lean: "PASS", confidence: "PASS", signal_type: "NO_EDGE", summary_reason: "No meaningful spread movement detected." };
+        }
+
+        let score = 0;
+        let sigType = "NO_EDGE";
+        const reasons: string[] = [];
+
+        if (spreadSignal === "STEAM") {
+          score = 80;
+          sigType = "STEAM_SPREAD";
+          reasons.push(`Coordinated steam: ${booksAgreeingSpread}/${totalBooks} books moved ${fmtSpread(consensusMove)}.`);
+          reasons.push(`Velocity: ${spreadVelocity.toFixed(2)} pts/hr.`);
+        } else if (spreadSignal === "RLM") {
+          score = 60;
+          sigType = "RLM_SPREAD";
+          reasons.push(`Reverse line movement: ${booksAgreeingSpread} books against ${(homeBetsPct ?? 50) > 50 ? `${homeBetsPct}% public on ${homeTeam}` : `${awayBetsPct ?? 50}% public on ${awayTeam}`}.`);
+          reasons.push(`Line: ${fmtSpread(openSpread)} → ${fmtSpread(currentSpread)}.`);
+        } else if (spreadSignal === "SHARP_ACCUM") {
+          score = 45;
+          sigType = "SHARP_ACCUMULATION";
+          reasons.push(`Gradual spread drift with sharp money alignment.`);
+        } else if (spreadSignal === "SHADE") {
+          score = 35;
+          sigType = "BOOK_SHADE";
+          reasons.push(`${booksAgreeingSpread} book(s) shaded line. Move: ${fmtSpread(openSpread)} → ${fmtSpread(currentSpread)}.`);
+        } else if (spreadSignal === "PUBLIC_DRIVEN") {
+          score = 18;
+          sigType = "PUBLIC_DRIVEN";
+          reasons.push(`Line moved WITH ${(homeBetsPct ?? 50) > 50 ? `${homeBetsPct}%` : `${awayBetsPct ?? 50}%`} public on ${publicTeamName}. No sharp confirmation.`);
+        } else {
+          score = 10;
+          sigType = "NO_EDGE";
+          reasons.push(`Minor spread movement (${fmtSpread(consensusMove)}). Insufficient for directional lean.`);
+        }
+
+        // Splits alignment bonus
+        if (sharpDivergence && spreadAgainstPublic) score += 10;
+
+        // Cross-market confirmation bonus
+        if (mlLayer.hasMinorMove && Math.sign(consensusMLProbDelta) === Math.sign(-consensusMove)) score += 5;
+
+        const conf = scoreToConfidence(score);
+        return {
+          lean: conf === "PASS" ? "PASS" : leanSpread,
+          confidence: conf,
+          signal_type: sigType,
+          summary_reason: reasons.join(" "),
+        };
+      })();
+
+      // ── TOTAL market read ──
+      const totalRead: MarketRead = (() => {
+        if (totalSignal === "NONE" && !totalLayer.hasMinorMove) {
+          return { lean: "PASS", confidence: "PASS", signal_type: "NO_EDGE", summary_reason: "No meaningful total movement." };
+        }
+
+        const direction = consensusTotalMove < 0 ? "Under" : "Over";
+        const leanDisplay = currentTotal != null ? `${direction} ${currentTotal}` : direction;
+
+        let score = 0;
+        let sigType = "NO_EDGE";
+        const reasons: string[] = [];
+
+        if (totalSignal === "STEAM") {
+          score = 70;
+          sigType = "STEAM_TOTAL";
+          reasons.push(`Coordinated total steam: ${booksAgreeingTotal} books moved ${direction.toLowerCase()}.`);
+          reasons.push(`Total: ${openTotal} → ${currentTotal} (${consensusTotalMove > 0 ? "+" : ""}${consensusTotalMove.toFixed(1)}).`);
+        } else if (totalSignal === "SHADE") {
+          score = 35;
+          sigType = "SHARP_ACCUMULATION_TOTAL";
+          reasons.push(`${booksAgreeingTotal} books moved total ${direction.toLowerCase()}: ${openTotal} → ${currentTotal}.`);
+        } else if (totalSignal === "MINOR") {
+          score = 15;
+          sigType = "NO_EDGE";
+          reasons.push(`Minor total movement ${direction.toLowerCase()}: ${openTotal ?? "?"} → ${currentTotal ?? "?"} (${consensusTotalMove > 0 ? "+" : ""}${consensusTotalMove.toFixed(1)}).`);
+        }
+
+        // Cross-layer confirmation: if spread or ML also moved directionally
+        if (spreadLayer.hasMinorMove || mlLayer.hasMinorMove) score += 5;
+
+        const conf = scoreToConfidence(score);
+        return {
+          lean: conf === "PASS" ? "PASS" : leanDisplay,
+          confidence: conf,
+          signal_type: sigType,
+          summary_reason: reasons.join(" "),
+        };
+      })();
+
+      // ── MONEYLINE market read ──
+      const mlRead: MarketRead = (() => {
+        if (mlSignal === "NONE" && !mlLayer.hasMinorMove) {
+          return { lean: "PASS", confidence: "PASS", signal_type: "NO_EDGE", summary_reason: "No meaningful moneyline movement." };
+        }
+
+        // ML direction: positive prob delta = home becoming more favored
+        const mlLeanTeam = consensusMLProbDelta > 0 ? homeTeam : awayTeam;
+        const leanDisplay = `${mlLeanTeam} ML`;
+
+        let score = 0;
+        let sigType = "NO_EDGE";
+        const reasons: string[] = [];
+
+        if (mlSignal === "STEAM") {
+          score = 75;
+          sigType = "STEAM_ML";
+          reasons.push(`ML steam: ${booksAgreeingML} books moved toward ${mlLeanTeam}.`);
+          reasons.push(`Implied prob shift: ${absMLProbDelta.toFixed(1)}%. Velocity: ${mlVelocity.toFixed(1)}%/hr.`);
+        } else if (mlSignal === "RLM") {
+          score = 55;
+          sigType = "RLM_ML";
+          reasons.push(`ML reverse line movement: ${booksAgreeingML} books improving ${mlLeanTeam}.`);
+          if (sharpDivergence && sharpSide === mlLeanTeam) {
+            reasons.push(`Money% > bets% on ${mlLeanTeam} confirms sharp side.`);
+            score += 10;
+          }
+        } else if (mlSignal === "SHARP_ACCUM") {
+          score = 45;
+          sigType = "SHARP_ACCUMULATION_ML";
+          reasons.push(`Gradual ML drift toward ${mlLeanTeam} (${absMLProbDelta.toFixed(1)}% implied prob shift).`);
+          if (sharpDivergence) {
+            reasons.push(`Money%/bets% divergence (${divergenceGap.toFixed(0)}%) confirms sharp accumulation.`);
+            score += 8;
+          }
+        } else if (mlSignal === "SHADE") {
+          score = 30;
+          sigType = "SHADE_ML";
+          reasons.push(`${booksAgreeingML} book(s) shaded ML toward ${mlLeanTeam}. Prob shift: ${absMLProbDelta.toFixed(1)}%.`);
+        } else {
+          score = 12;
+          sigType = "NO_EDGE";
+          reasons.push(`Minor ML movement toward ${mlLeanTeam} (${absMLProbDelta.toFixed(1)}% implied prob shift).`);
+        }
+
+        // Splits confirmation for ML
+        if (sharpDivergence && sharpSide === mlLeanTeam && sigType !== "SHARP_ACCUMULATION_ML") score += 8;
+
+        // Spread confirmation: if spread also moved toward same team
+        const spreadLeanTeam = consensusMove < 0 ? homeTeam : awayTeam;
+        if (spreadLayer.hasMinorMove && spreadLeanTeam === mlLeanTeam) score += 5;
+
+        const conf = scoreToConfidence(score);
+        return {
+          lean: conf === "PASS" ? "PASS" : leanDisplay,
+          confidence: conf,
+          signal_type: sigType,
+          summary_reason: reasons.join(" "),
+        };
+      })();
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //  COMPOSITE SIGNAL — overall_badge derives from STRONGEST market read
+      //
+      //  Priority: STEAM > RLM > SHARP_ACCUM > SHADE > PUBLIC_DRIVEN >
+      //            WATCH > FROZEN
+      //
+      //  A quiet spread CANNOT force FROZEN if ML or total has a real read.
+      // ═══════════════════════════════════════════════════════════════════════
+
       const signalPriority = (s: LayerSignal): number => {
         switch (s) {
-          case "STEAM": return 5;
-          case "RLM": return 4;
-          case "SHARP_ACCUM": return 3;
-          case "SHADE": return 2;
+          case "STEAM": return 6;
+          case "RLM": return 5;
+          case "SHARP_ACCUM": return 4;
+          case "SHADE": return 3;
+          case "PUBLIC_DRIVEN": return 2;
           case "MINOR": return 1;
           case "NONE": return 0;
         }
@@ -396,64 +613,54 @@ serve(async (req) => {
       const bestTotal = signalPriority(totalSignal);
       const bestOverall = Math.max(bestSpread, bestML, bestTotal);
 
-      // Determine primary layer for direction
+      // primary_market: which market drives the classification
+      let primaryMarket: "side" | "total" | "moneyline" | "none" = "none";
+      if (bestSpread >= bestML && bestSpread >= bestTotal && bestSpread > 0) primaryMarket = "side";
+      else if (bestML >= bestTotal && bestML > 0) primaryMarket = "moneyline";
+      else if (bestTotal > 0) primaryMarket = "total";
+
       type SignalSource = "spread" | "ml" | "total";
       let primarySource: SignalSource = "spread";
       if (bestML > bestSpread && bestML >= bestTotal) primarySource = "ml";
       else if (bestTotal > bestSpread && bestTotal > bestML) primarySource = "total";
 
-      // ── Classify based on the strongest layer signal ──
+      // ── Classify overall badge + alert_type ──
 
-      if (bestOverall >= 5) {
-        // STEAM — at least one layer hit steam level
+      let signalTier = "";
+      let alertType = "";
+      let scenarioKey = "";
+
+      if (bestOverall >= 6) {
         signalTier = "STEAM MOVE";
-        if (spreadSignal === "STEAM") {
-          alertType = "STEAM_SPREAD";
-          scenarioKey = buildScenarioKey("STEAM_SPD", spreadLayer, mlLayer, totalLayer);
-        } else if (mlSignal === "STEAM") {
-          alertType = "STEAM_ML";
-          scenarioKey = buildScenarioKey("STEAM_ML", spreadLayer, mlLayer, totalLayer);
-        } else {
-          alertType = "STEAM_TOTAL";
-          scenarioKey = buildScenarioKey("STEAM_TOT", spreadLayer, mlLayer, totalLayer);
-        }
+        if (spreadSignal === "STEAM") { alertType = "STEAM_SPREAD"; }
+        else if (mlSignal === "STEAM") { alertType = "STEAM_ML"; }
+        else { alertType = "STEAM_TOTAL"; }
+        scenarioKey = buildScenarioKey(alertType, spreadLayer, mlLayer, totalLayer);
       }
-
-      else if (bestOverall >= 4) {
-        // RLM — meaningful move with 3+ books agreeing
+      else if (bestOverall >= 5) {
         signalTier = "NO-NARRATIVE RLM";
-        if (spreadSignal === "RLM") {
-          alertType = "RLM_SPREAD";
-          scenarioKey = buildScenarioKey("RLM_SPD", spreadLayer, mlLayer, totalLayer);
-        } else {
-          alertType = "RLM_ML";
-          scenarioKey = buildScenarioKey("RLM_ML", spreadLayer, mlLayer, totalLayer);
-        }
+        alertType = spreadSignal === "RLM" ? "RLM_SPREAD" : "RLM_ML";
+        scenarioKey = buildScenarioKey(alertType, spreadLayer, mlLayer, totalLayer);
       }
-
-      else if (bestOverall >= 3) {
-        // SHARP ACCUMULATION — gradual ML drift + splits confirmation
+      else if (bestOverall >= 4) {
         signalTier = "SHARP ACCUMULATION";
         alertType = "SHARP_ACCUM";
         scenarioKey = `SHARP_ACCUM|ml${absMLProbDelta.toFixed(1)}%|div${divergenceGap.toFixed(0)}%`;
       }
-
-      else if (bestOverall >= 2) {
-        // BOOK SHADE — meaningful move but limited book confirmation
+      else if (bestOverall >= 3) {
         signalTier = "BOOK SHADE";
-        if (spreadSignal === "SHADE") {
-          alertType = "SHADE_SPREAD";
-        } else if (mlSignal === "SHADE") {
-          alertType = "SHADE_ML";
-        } else {
-          alertType = "SHADE_TOTAL";
-        }
+        if (spreadSignal === "SHADE") alertType = "SHADE_SPREAD";
+        else if (mlSignal === "SHADE") alertType = "SHADE_ML";
+        else alertType = "SHADE_TOTAL";
         scenarioKey = buildScenarioKey("SHADE", spreadLayer, mlLayer, totalLayer);
       }
-
-      // ── FROZEN LINE — ALL three layers must be dead ──
-      // This is a LAST RESORT classification. Any meaningful activity in
-      // ANY layer (spread, ML, or total) prevents frozen classification.
+      else if (bestOverall >= 2) {
+        // PUBLIC_DRIVEN — movement with public, no sharp edge
+        signalTier = "WATCH";
+        alertType = "PUBLIC_DRIVEN";
+        scenarioKey = `PUBLIC|${publicTeamName}|${absMove.toFixed(1)}pts`;
+      }
+      // ── FROZEN LINE — ALL layers dead, no divergence, sufficient tracking ──
       else if (
         spreadSignal === "NONE" &&
         mlSignal === "NONE" &&
@@ -466,8 +673,7 @@ serve(async (req) => {
         alertType = "FROZEN";
         scenarioKey = `FROZEN|${totalBooks}books|${hoursElapsed.toFixed(0)}h`;
       }
-
-      // ── WATCH — any minor activity that doesn't qualify higher ──
+      // ── WATCH — any minor activity ──
       else if (bestOverall >= 1 || sharpDivergence) {
         signalTier = "WATCH";
         alertType = "WATCH";
@@ -483,25 +689,18 @@ serve(async (req) => {
 
       // ═══════════════════════════════════════════════════════════════════════
       //  DIRECTION — sharp team / fade team
-      //
-      //  Uses the primary signal layer to determine direction.
-      //  For ML: positive prob delta = home improving; negative = away improving.
-      //  Fallback chain: primary layer → splits → default.
       // ═══════════════════════════════════════════════════════════════════════
 
       let sharpTeam: string;
       let fadeTeam: string;
 
       if (signalTier === "SHARP ACCUMULATION" && sharpSide) {
-        // Direction from splits divergence (most reliable for this tier)
         sharpTeam = sharpSide;
         fadeTeam = sharpSide === homeTeam ? awayTeam : homeTeam;
       } else if (primarySource === "ml" && mlLayer.hasMinorMove) {
-        // ML-based direction: positive prob delta = home becoming more favored
         sharpTeam = consensusMLProbDelta > 0 ? homeTeam : awayTeam;
         fadeTeam = consensusMLProbDelta > 0 ? awayTeam : homeTeam;
       } else if (primarySource === "total") {
-        // Total doesn't have a team-side direction — use ML or splits as backup
         if (mlLayer.hasMinorMove) {
           sharpTeam = consensusMLProbDelta > 0 ? homeTeam : awayTeam;
           fadeTeam = consensusMLProbDelta > 0 ? awayTeam : homeTeam;
@@ -513,11 +712,9 @@ serve(async (req) => {
           fadeTeam = awayTeam;
         }
       } else if (spreadLayer.hasMeaningfulMove) {
-        // Standard spread-based direction
         sharpTeam = consensusMove > 0 ? awayTeam : homeTeam;
         fadeTeam = consensusMove > 0 ? homeTeam : awayTeam;
       } else if (mlLayer.hasMinorMove) {
-        // Fallback: any ML movement
         sharpTeam = consensusMLProbDelta > 0 ? homeTeam : awayTeam;
         fadeTeam = consensusMLProbDelta > 0 ? awayTeam : homeTeam;
       } else if (sharpDivergence && sharpSide) {
@@ -529,7 +726,7 @@ serve(async (req) => {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      //  HSA NARRATIVE TRIGGER
+      //  HSA NARRATIVE
       // ═══════════════════════════════════════════════════════════════════════
 
       let hsaNarrative = "";
@@ -547,14 +744,13 @@ serve(async (req) => {
         hsaNarrative = hsaRes.data?.narrative ?? "";
       } catch { hsaNarrative = ""; }
 
-      // If HSA found a narrative for RLM, downgrade (line has a public explanation)
+      // Narrative-based tier adjustments
       if (signalTier === "NO-NARRATIVE RLM" && hsaNarrative && hsaNarrative !== "NO_NARRATIVE") {
         signalTier = "WATCH";
         alertType = "WATCH_NARRATIVE";
         scenarioKey = `WATCH_NARRATIVE|${absMove.toFixed(1)}pts`;
       }
 
-      // Upgrade to DOUBLE if move is large and fast across spread
       if (signalTier === "NO-NARRATIVE RLM" && absMove >= 1.5 && spreadLayer.booksAgreeing >= 4) {
         signalTier = "DOUBLE NO-NARRATIVE RLM";
         alertType = `DOUBLE_${alertType}`;
@@ -562,16 +758,12 @@ serve(async (req) => {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      //  CONFIDENCE SCORING
-      //
-      //  Multi-layer confidence: each layer contributes independently.
-      //  A moderate ML signal can produce moderate confidence even when
-      //  spread is flat.
+      //  OVERALL CONFIDENCE — multi-layer composite
       // ═══════════════════════════════════════════════════════════════════════
 
       let confidenceScore = 0;
 
-      // Spread contribution (0-30 points)
+      // Spread contribution (0-30)
       if (spreadLayer.hasMeaningfulMove) {
         confidenceScore += 15;
         confidenceScore += Math.min(spreadLayer.booksAgreeing * 3, 9);
@@ -580,16 +772,16 @@ serve(async (req) => {
         confidenceScore += 5;
       }
 
-      // ML contribution (0-30 points)
+      // ML contribution (0-30)
       if (mlLayer.hasMeaningfulMove) {
         confidenceScore += 15;
         confidenceScore += Math.min(mlLayer.booksAgreeing * 3, 9);
         if (mlLayer.velocity >= (isMLPrimary ? 1.0 : 1.5)) confidenceScore += 6;
       } else if (mlLayer.hasMinorMove) {
-        confidenceScore += 8; // ML minor moves still carry weight
+        confidenceScore += 8;
       }
 
-      // Totals contribution (0-15 points)
+      // Totals contribution (0-15)
       if (totalLayer.hasMeaningfulMove) {
         confidenceScore += 10;
         if (totalLayer.booksAgreeing >= 2) confidenceScore += 5;
@@ -597,31 +789,35 @@ serve(async (req) => {
         confidenceScore += 3;
       }
 
-      // Splits alignment bonus (0-15 points)
+      // Splits alignment (0-15)
       if (sharpDivergence) {
         confidenceScore += 10;
         if (divergenceGap >= 15) confidenceScore += 5;
       }
 
-      // Cross-layer confirmation bonus (0-10 points)
+      // Cross-layer confirmation (0-10)
       const layersWithSignal = [spreadSignal, mlSignal, totalSignal].filter(s => s !== "NONE").length;
       if (layersWithSignal >= 2) confidenceScore += 5;
       if (layersWithSignal >= 3) confidenceScore += 5;
 
-      // Cap at 100
       confidenceScore = Math.min(confidenceScore, 100);
+
+      // Determine the primary signal description for the structured output
+      const primarySignal = (() => {
+        const best = [
+          { read: sideRead, market: "side" },
+          { read: totalRead, market: "total" },
+          { read: mlRead, market: "moneyline" },
+        ].sort((a, b) => {
+          const confOrder = { HIGH: 4, MODERATE: 3, LOW: 2, PASS: 1 };
+          return (confOrder[b.read.confidence] || 0) - (confOrder[a.read.confidence] || 0);
+        })[0];
+        return best.read.confidence !== "PASS" ? best.read.signal_type : "NO_EDGE";
+      })();
 
       // ═══════════════════════════════════════════════════════════════════════
       //  BUILD ALERT OUTPUT
       // ═══════════════════════════════════════════════════════════════════════
-
-      // Opening and current spread (consensus average across books)
-      const openSpread = hasSpreadData
-        ? parseFloat((bookSpreads.reduce((sum, b) => sum + b.open, 0) / bookSpreads.length).toFixed(1))
-        : null;
-      const currentSpread = hasSpreadData
-        ? parseFloat((bookSpreads.reduce((sum, b) => sum + b.current, 0) / bookSpreads.length).toFixed(1))
-        : null;
 
       const alert: Record<string, unknown> = {
         home_team: homeTeam,
@@ -641,45 +837,58 @@ serve(async (req) => {
         confidence_score: confidenceScore,
         hsa_narrative: hsaNarrative,
         detected_at: now.toISOString(),
+
+        // ── Per-market structured reads (JSON) ──
+        side_lean: sideRead.lean,
+        side_confidence: sideRead.confidence,
+        side_signal_type: sideRead.signal_type,
+        side_summary: sideRead.summary_reason,
+
+        total_lean: totalRead.lean,
+        total_confidence: totalRead.confidence,
+        total_signal_type: totalRead.signal_type,
+        total_summary: totalRead.summary_reason,
+
+        ml_lean: mlRead.lean,
+        ml_confidence: mlRead.confidence,
+        ml_signal_type: mlRead.signal_type,
+        ml_summary: mlRead.summary_reason,
+
+        primary_market: primaryMarket,
+        primary_signal: primarySignal,
+        overall_badge: signalTier,
       };
 
-      // Moneyline data (all sports)
+      // Moneyline data
       if (hasMLData) {
         alert.moneyline_move = parseFloat(consensusMLRaw.toFixed(0));
         alert.ml_prob_delta = parseFloat(consensusMLProbDelta.toFixed(2));
-        // Store open/current ML for display
         if (bookMLs.length > 0) {
-          alert.home_ml_open = parseFloat((bookMLs.reduce((s, b) => s + b.openML, 0) / bookMLs.length).toFixed(0));
-          alert.home_ml_current = parseFloat((bookMLs.reduce((s, b) => s + b.currML, 0) / bookMLs.length).toFixed(0));
+          alert.home_ml_open = avgOpenMLHome;
+          alert.home_ml_current = avgCurrMLHome;
         }
       }
 
       // Totals movement
       if (hasTotalData) {
         alert.total_move = parseFloat(consensusTotalMove.toFixed(1));
-        if (bookTotals.length > 0) {
-          alert.opening_total = parseFloat(
-            (bookTotals.reduce((s, b) => s + b.open, 0) / bookTotals.length).toFixed(1)
-          );
-          alert.current_total = parseFloat(
-            (bookTotals.reduce((s, b) => s + b.current, 0) / bookTotals.length).toFixed(1)
-          );
-        }
+        alert.opening_total = openTotal;
+        alert.current_total = currentTotal;
       }
 
-      // Splits snapshot for downstream consumers
+      // Splits
       if (homeBetsPct != null) {
         alert.home_bets_pct = homeBetsPct;
         alert.home_money_pct = homeMoneyPct;
       }
 
-      // Layer diagnostics — useful for debugging and HSA context
+      // Layer diagnostics
       alert.spread_signal = spreadSignal;
       alert.ml_signal = mlSignal;
       alert.total_signal = totalSignal;
       alert.primary_source = primarySource;
 
-      // Upsert into rlm_alerts
+      // Upsert
       await supabase.from("rlm_alerts").upsert(alert, { onConflict: "home_team,away_team,league" });
       results.push(alert);
     }
