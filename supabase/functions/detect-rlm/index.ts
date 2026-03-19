@@ -267,7 +267,7 @@ serve(async (req) => {
       const hasMLData = mlProbDeltas.length > 0;
       const hasTotalData = totalMovements.length > 0;
 
-      if (!hasSpreadData && !hasMLData) continue;
+      if (!hasSpreadData && !hasMLData && !hasTotalData) continue;
 
       const consensusMove = median(bookMovements);
       const consensusMLProbDelta = median(mlProbDeltas);
@@ -766,7 +766,12 @@ serve(async (req) => {
         scenarioKey = `FROZEN|${totalBooks}books|${hoursElapsed.toFixed(0)}h`;
       }
 
-      if (!signalTier) continue;
+      // ── DEFAULT: TRACKING (no signal, insufficient data for FROZEN) ──
+      if (!signalTier) {
+        signalTier = "TRACKING";
+        alertType = "TRACKING";
+        scenarioKey = `TRACKING|${totalBooks}books|${hoursElapsed.toFixed(1)}h`;
+      }
 
       // ═══════════════════════════════════════════════════════════════════════
       //  DIRECTION — sharp team / fade team
@@ -884,45 +889,65 @@ serve(async (req) => {
       confidenceScore = Math.min(confidenceScore, 100);
 
       // Determine the primary signal description for the structured output
+      // (uses safe reads computed below, but we can reference the original
+      //  reads here since they're always initialized by the IIFEs above)
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //  NON-NULL ENFORCEMENT — every game MUST produce all three reads.
+      //  If any read is somehow undefined, default to PASS/NO_EDGE.
+      // ═══════════════════════════════════════════════════════════════════════
+
+      const PASS_READ: MarketRead = { lean: "PASS", confidence: "PASS", signal_type: "NO_EDGE", summary_reason: "No data available for this market." };
+
+      const safeSideRead: MarketRead = sideRead ?? PASS_READ;
+      const safeTotalRead: MarketRead = totalRead ?? PASS_READ;
+      const safeMlRead: MarketRead = mlRead ?? PASS_READ;
+
+      // ═══════════════════════════════════════════════════════════════════════
+      //  FROZEN SAFETY GUARD — absolute last-resort override
+      //
+      //  FROZEN is ONLY valid when ALL three reads are PASS.
+      //  If ANY read is non-PASS, override to WATCH.
+      //  If all reads are PASS but FROZEN conditions weren't met
+      //  (e.g. insufficient tracking time), use TRACKING instead.
+      // ═══════════════════════════════════════════════════════════════════════
+
+      const allReadsPass =
+        safeSideRead.confidence === "PASS" &&
+        safeTotalRead.confidence === "PASS" &&
+        safeMlRead.confidence === "PASS";
+
+      if (signalTier === "FROZEN LINE" && !allReadsPass) {
+        signalTier = "WATCH";
+        alertType = "WATCH";
+        const reasons: string[] = ["DEFROSTED"];
+        if (safeSideRead.confidence !== "PASS") reasons.push(`side:${safeSideRead.confidence}`);
+        if (safeTotalRead.confidence !== "PASS") reasons.push(`tot:${safeTotalRead.confidence}`);
+        if (safeMlRead.confidence !== "PASS") reasons.push(`ml:${safeMlRead.confidence}`);
+        scenarioKey = reasons.join("|");
+      }
+
+      // ── overall_badge: reflects the final signal tier ──
+      const overallBadge = signalTier;
+
+      // ── primarySignal: strongest non-PASS market signal type ──
       const primarySignal = (() => {
         const best = [
-          { read: sideRead, market: "side" },
-          { read: totalRead, market: "total" },
-          { read: mlRead, market: "moneyline" },
+          { read: safeSideRead, market: "side" },
+          { read: safeTotalRead, market: "total" },
+          { read: safeMlRead, market: "moneyline" },
         ].sort((a, b) => {
-          const confOrder = { HIGH: 4, MODERATE: 3, LOW: 2, PASS: 1 };
+          const confOrder: Record<string, number> = { HIGH: 4, MODERATE: 3, LOW: 2, PASS: 1 };
           return (confOrder[b.read.confidence] || 0) - (confOrder[a.read.confidence] || 0);
         })[0];
         return best.read.confidence !== "PASS" ? best.read.signal_type : "NO_EDGE";
       })();
 
       // ═══════════════════════════════════════════════════════════════════════
-      //  FROZEN SAFETY GUARD — absolute last-resort override
-      //
-      //  If ANY per-market read produced a non-PASS confidence, the game
-      //  has meaningful activity and must NOT be FROZEN.  Promote to WATCH.
-      // ═══════════════════════════════════════════════════════════════════════
-
-      if (signalTier === "FROZEN LINE") {
-        const anyNonPass =
-          sideRead.confidence !== "PASS" ||
-          totalRead.confidence !== "PASS" ||
-          mlRead.confidence !== "PASS";
-
-        if (anyNonPass) {
-          signalTier = "WATCH";
-          alertType = "WATCH";
-          // Build descriptive scenario key from what was actually found
-          const reasons: string[] = ["DEFROSTED"];
-          if (sideRead.confidence !== "PASS") reasons.push(`side:${sideRead.confidence}`);
-          if (totalRead.confidence !== "PASS") reasons.push(`tot:${totalRead.confidence}`);
-          if (mlRead.confidence !== "PASS") reasons.push(`ml:${mlRead.confidence}`);
-          scenarioKey = reasons.join("|");
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════════
       //  BUILD ALERT OUTPUT
+      //
+      //  All three market reads are guaranteed non-null via safeSideRead,
+      //  safeTotalRead, safeMlRead. Every field is explicitly populated.
       // ═══════════════════════════════════════════════════════════════════════
 
       const alert: Record<string, unknown> = {
@@ -945,25 +970,25 @@ serve(async (req) => {
         hsa_narrative: hsaNarrative,
         detected_at: now.toISOString(),
 
-        // ── Per-market structured reads (JSON) ──
-        side_lean: sideRead.lean,
-        side_confidence: sideRead.confidence,
-        side_signal_type: sideRead.signal_type,
-        side_summary: sideRead.summary_reason,
+        // ── Per-market structured reads — guaranteed non-null ──
+        side_lean: safeSideRead.lean,
+        side_confidence: safeSideRead.confidence,
+        side_signal_type: safeSideRead.signal_type,
+        side_summary: safeSideRead.summary_reason,
 
-        total_lean: totalRead.lean,
-        total_confidence: totalRead.confidence,
-        total_signal_type: totalRead.signal_type,
-        total_summary: totalRead.summary_reason,
+        total_lean: safeTotalRead.lean,
+        total_confidence: safeTotalRead.confidence,
+        total_signal_type: safeTotalRead.signal_type,
+        total_summary: safeTotalRead.summary_reason,
 
-        ml_lean: mlRead.lean,
-        ml_confidence: mlRead.confidence,
-        ml_signal_type: mlRead.signal_type,
-        ml_summary: mlRead.summary_reason,
+        ml_lean: safeMlRead.lean,
+        ml_confidence: safeMlRead.confidence,
+        ml_signal_type: safeMlRead.signal_type,
+        ml_summary: safeMlRead.summary_reason,
 
-        primary_market: primaryMarket,
+        primary_market: primaryMarket !== "none" ? primaryMarket : "none",
         primary_signal: primarySignal,
-        overall_badge: signalTier,
+        overall_badge: overallBadge,
       };
 
       // Moneyline data
