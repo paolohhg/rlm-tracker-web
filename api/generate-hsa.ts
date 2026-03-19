@@ -623,15 +623,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('created_at', { ascending: false })
       .limit(1);
 
+    // Cache check: return existing analysis only if:
+    //   1. Less than 30 min old (was 2h — too stale for moving markets)
+    //   2. Not force-refreshed
+    //   3. Current odds haven't moved meaningfully since cached analysis
     if (existing?.length && !force) {
       const age = Date.now() - new Date(existing[0].created_at).getTime();
-      const twoHours = 2 * 60 * 60 * 1000;
-      if (age < twoHours && existing[0].analysis) {
-        return res.status(200).json({
-          narrative: existing[0].analysis,
-          cached: true,
-          created_at: existing[0].created_at,
-        });
+      const thirtyMin = 30 * 60 * 1000;
+      if (age < thirtyMin && existing[0].analysis) {
+        // Quick-check: has the line moved since this analysis was cached?
+        // Fetch the latest snapshot to compare
+        const { data: latestSnap } = await supabase
+          .from('odds_snapshots')
+          .select('spread, total')
+          .eq('league', league)
+          .eq('home_team', home_team)
+          .eq('away_team', away_team)
+          .order('fetched_at', { ascending: false })
+          .limit(1);
+
+        let lineMovedSignificantly = false;
+        if (latestSnap?.length && existing[0].analysis) {
+          const text = existing[0].analysis as string;
+          // Extract the consensus total/spread from cached text
+          const totalMatch = text.match(/total.*?(\d{2,3}(?:\.\d)?)/i);
+          const cachedTotal = totalMatch ? parseFloat(totalMatch[1]) : null;
+          const currentTotal = latestSnap[0].total;
+          if (cachedTotal && currentTotal && Math.abs(currentTotal - cachedTotal) >= 1.0) {
+            lineMovedSignificantly = true;
+          }
+          const currentSpread = latestSnap[0].spread;
+          // Check spread movement by looking at what the analysis mentions
+          if (currentSpread != null) {
+            const spreadMatch = text.match(/consensus.*?(-?\d+(?:\.\d)?)/i);
+            const cachedSpread = spreadMatch ? parseFloat(spreadMatch[1]) : null;
+            if (cachedSpread != null && Math.abs(currentSpread - cachedSpread) >= 1.0) {
+              lineMovedSignificantly = true;
+            }
+          }
+        }
+
+        if (!lineMovedSignificantly) {
+          return res.status(200).json({
+            narrative: existing[0].analysis,
+            cached: true,
+            created_at: existing[0].created_at,
+          });
+        }
+        // Line moved — fall through to regenerate
       }
     }
 
