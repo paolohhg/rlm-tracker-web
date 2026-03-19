@@ -57,7 +57,7 @@ export interface OddsSummary {
   sharpIndicators: {
     steamMove: boolean;
     steamDetail: string | null;
-    frozenLine: boolean;
+    consensusLine: boolean;
     crossedKeyNumber: boolean;
     keyNumbersNear: number[];
   };
@@ -65,7 +65,7 @@ export interface OddsSummary {
     totalSteamMove: boolean;
     totalSteamDetail: string | null;
     totalSteamDirection: 'over' | 'under' | null;
-    frozenTotal: boolean;
+    consensusTotal: boolean;
     totalVelocityPerHour: number;
     highestTotalSeen: number;
     lowestTotalSeen: number;
@@ -120,7 +120,7 @@ export function summarizeOdds(
       sharpIndicators: {
         steamMove: false,
         steamDetail: null,
-        frozenLine: false,
+        consensusLine: false,
         crossedKeyNumber: false,
         keyNumbersNear: [],
       },
@@ -128,7 +128,7 @@ export function summarizeOdds(
         totalSteamMove: false,
         totalSteamDetail: null,
         totalSteamDirection: null,
-        frozenTotal: false,
+        consensusTotal: false,
         totalVelocityPerHour: 0,
         highestTotalSeen: 0,
         lowestTotalSeen: 0,
@@ -240,8 +240,8 @@ export function summarizeOdds(
     }
   }
 
-  // Frozen line: tracked for >2h with <0.5 movement
-  const frozenLine = trackingHours >= 2 && Math.abs(spreadMovement) < 0.5;
+  // Consensus line: tracked for >2h with <0.5 movement — market agrees on the number
+  const consensusLine = trackingHours >= 2 && Math.abs(spreadMovement) < 0.5;
 
   // Key number crossing
   const openAbsSpread = Math.abs(openingConsensusSpread);
@@ -271,7 +271,7 @@ export function summarizeOdds(
     }
   }
 
-  const frozenTotal = trackingHours >= 2 && Math.abs(totalMovement) < 0.5;
+  const consensusTotal = trackingHours >= 2 && Math.abs(totalMovement) < 0.5;
   const totalVelocityPerHour =
     trackingHours > 0 ? round1(Math.abs(totalMovement) / trackingHours) : 0;
 
@@ -317,7 +317,7 @@ export function summarizeOdds(
     sharpIndicators: {
       steamMove,
       steamDetail,
-      frozenLine,
+      consensusLine,
       crossedKeyNumber,
       keyNumbersNear,
     },
@@ -325,7 +325,7 @@ export function summarizeOdds(
       totalSteamMove,
       totalSteamDetail,
       totalSteamDirection,
-      frozenTotal,
+      consensusTotal,
       totalVelocityPerHour,
       highestTotalSeen,
       lowestTotalSeen,

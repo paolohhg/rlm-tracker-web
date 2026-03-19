@@ -133,6 +133,20 @@ serve(async (req) => {
       const booksAgreeing = Math.max(booksAgreeingSpread, booksAgreeingML);
       const totalBooks = Math.max(bookMovements.length, mlMovements.length);
 
+      // Book clustering: how tightly aligned are current spreads?
+      const currentSpreads = bookSpreads.map(b => b.current);
+      const medianSpread = (() => {
+        if (!currentSpreads.length) return 0;
+        const sorted = [...currentSpreads].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+      })();
+      const booksClustered = currentSpreads.filter(s => Math.abs(s - medianSpread) <= 0.5).length;
+      const coordinationScore = totalBooks > 0 ? booksClustered / totalBooks : 0;
+      const lineRange = currentSpreads.length > 1
+        ? Math.max(...currentSpreads) - Math.min(...currentSpreads)
+        : 0;
+
       // Use ML-based signal when spread is flat but ML moved (common in NHL/MLB)
       const mlSignal = isMLPrimary && absMLMove >= mlThreshold && booksAgreeingML >= 2;
       const spreadSignal = absMove >= spreadThreshold;
@@ -166,10 +180,20 @@ serve(async (req) => {
       const mlVelocityPerHour = hoursElapsed > 0 ? absMLMove / hoursElapsed : 0;
 
       // Detect signal tier (league-aware)
+      // Tournament-aware thresholds for NCAAB
+      const isTournament = league === "NCAAB"; // Tournament tag not in odds_snapshots; treat all NCAAB with sharper thresholds
+      const watchThreshold = isTournament ? 0.2 : 0.3;
+      // For tournament NCAAB, allow strong signal at 0.25 if books are coordinated
+      const effectiveSpreadThreshold = (isTournament && coordinationScore >= 0.75 && totalBooks >= 4)
+        ? 0.25
+        : spreadThreshold;
+      const effectiveSpreadSignal = absMove >= effectiveSpreadThreshold;
+      const effectiveHasSignal = effectiveSpreadSignal || mlSignal;
+
       let signalTier = "";
       let scenarioKey = "";
 
-      if (hasSignal && booksAgreeing >= 3) {
+      if (effectiveHasSignal && booksAgreeing >= 3) {
         const isHighVelocity = isMLPrimary
           ? (mlVelocityPerHour >= 10 || velocityPerHour >= 0.3)
           : velocityPerHour >= 0.5;
@@ -181,14 +205,15 @@ serve(async (req) => {
           signalTier = "NO-NARRATIVE RLM";
           scenarioKey = `RLM|${booksAgreeing}books|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
         }
-      } else if (hasSignal && booksAgreeing >= 1) {
+      } else if (effectiveHasSignal && booksAgreeing >= 1) {
         signalTier = "BOOK SHADE";
         scenarioKey = `SHADE|${booksAgreeing}books|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
-      } else if (absMove < 0.2 && absMLMove < 5 && totalBooks >= 2 && hoursElapsed >= 3) {
-        // Only tag as FROZEN if the line has been tracked for 3+ hours and truly hasn't moved
-        signalTier = "FROZEN LINE";
-        scenarioKey = `FROZEN|${totalBooks}books|${hoursElapsed.toFixed(0)}h`;
-      } else if (absMove >= 0.3 || (isMLPrimary && absMLMove >= mlThreshold * 0.7)) {
+      } else if (absMove < 0.2 && absMLMove < 5 && totalBooks >= 4 && coordinationScore >= 0.75 && hoursElapsed >= 3) {
+        // CONSENSUS: books are tightly clustered, stable, high book count — market agrees on the number
+        signalTier = "CONSENSUS";
+        scenarioKey = `CONSENSUS|${totalBooks}books|${booksClustered}clustered|${hoursElapsed.toFixed(0)}h`;
+      } else if (absMove >= watchThreshold || (isMLPrimary && absMLMove >= mlThreshold * 0.7)) {
+        // WATCH: covers 0.2+ (tournament) or 0.3+ (standard) — no dead zone
         signalTier = "WATCH";
         scenarioKey = `WATCH|${isMLPrimary ? absMLMove + 'c' : absMove.toFixed(1) + 'pts'}`;
       }

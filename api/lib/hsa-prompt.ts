@@ -170,13 +170,13 @@ Max book disagreement: ${summary.maxBookDisagreement} pts
 
 SHARP INDICATORS:
 Steam move: ${summary.sharpIndicators.steamMove ? `YES - ${summary.sharpIndicators.steamDetail}` : 'No'}
-Frozen line: ${summary.sharpIndicators.frozenLine ? 'YES - line barely moved despite extended tracking' : 'No'}
+Consensus market: ${summary.sharpIndicators.consensusLine ? 'YES - books tightly aligned with minimal movement, market agrees on this number' : 'No'}
 Crossed key number: ${summary.sharpIndicators.crossedKeyNumber ? 'YES' : 'No'}
 Key numbers nearby: ${summary.sharpIndicators.keyNumbersNear.length ? summary.sharpIndicators.keyNumbersNear.join(', ') : 'none'}
 
 TOTALS SHARP INDICATORS:
 Total steam move: ${summary.totalSharpIndicators.totalSteamMove ? `YES - ${summary.totalSharpIndicators.totalSteamDetail} (${summary.totalSharpIndicators.totalSteamDirection})` : 'No'}
-Frozen total: ${summary.totalSharpIndicators.frozenTotal ? 'YES - total barely moved despite extended tracking' : 'No'}
+Consensus total: ${summary.totalSharpIndicators.consensusTotal ? 'YES - total market consensus with minimal movement' : 'No'}
 Total velocity: ${summary.totalSharpIndicators.totalVelocityPerHour} pts/hr
 Total book disagreement: ${summary.totalSharpIndicators.totalBookDisagreement} pts
 Highest total seen: ${summary.totalSharpIndicators.highestTotalSeen} / Lowest: ${summary.totalSharpIndicators.lowestTotalSeen}

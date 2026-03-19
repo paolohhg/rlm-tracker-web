@@ -292,7 +292,7 @@ interface OddsSummary {
   sharpIndicators: {
     steamMove: boolean;
     steamDetail: string | null;
-    frozenLine: boolean;
+    consensusLine: boolean;
     crossedKeyNumber: boolean;
     keyNumbersNear: number[];
   };
@@ -300,7 +300,7 @@ interface OddsSummary {
     totalSteamMove: boolean;
     totalSteamDetail: string | null;
     totalSteamDirection: 'over' | 'under' | null;
-    frozenTotal: boolean;
+    consensusTotal: boolean;
     totalVelocityPerHour: number;
     highestTotalSeen: number;
     lowestTotalSeen: number;
@@ -353,8 +353,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
       current: { time: '', books: [], consensusSpread: 0, consensusTotal: 0 },
       spreadMovement: 0, totalMovement: 0, spreadDirection: 'stable', totalDirection: 'stable',
       velocityPerHour: 0, maxBookDisagreement: 0, timeline: [],
-      sharpIndicators: { steamMove: false, steamDetail: null, frozenLine: false, crossedKeyNumber: false, keyNumbersNear: [] },
-      totalSharpIndicators: { totalSteamMove: false, totalSteamDetail: null, totalSteamDirection: null, frozenTotal: false, totalVelocityPerHour: 0, highestTotalSeen: 0, lowestTotalSeen: 0, totalBookDisagreement: 0 },
+      sharpIndicators: { steamMove: false, steamDetail: null, consensusLine: false, crossedKeyNumber: false, keyNumbersNear: [] },
+      totalSharpIndicators: { totalSteamMove: false, totalSteamDetail: null, totalSteamDirection: null, consensusTotal: false, totalVelocityPerHour: 0, highestTotalSeen: 0, lowestTotalSeen: 0, totalBookDisagreement: 0 },
     };
   }
 
@@ -449,7 +449,7 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
     }
   }
 
-  const frozenLine = trackingHours >= 2 && Math.abs(spreadMovement) < 0.5;
+  const consensusLine = trackingHours >= 2 && Math.abs(spreadMovement) < 0.5;
 
   const openAbsSpread = Math.abs(openingConsensusSpread);
   const currentAbsSpread = Math.abs(currentConsensusSpread);
@@ -475,7 +475,7 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
     }
   }
 
-  const frozenTotal = trackingHours >= 2 && Math.abs(totalMovement) < 0.5;
+  const consensusTotal = trackingHours >= 2 && Math.abs(totalMovement) < 0.5;
   const totalVelocityPerHour = trackingHours > 0 ? round1(Math.abs(totalMovement) / trackingHours) : 0;
 
   const timelineTotals = timeline.map((t) => t.consensusTotal).filter((t) => t > 0);
@@ -496,8 +496,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
     opening: { time: firstTime, books: openingBooks, consensusSpread: openingConsensusSpread, consensusTotal: openingConsensusTotal },
     current: { time: lastTime, books: currentBooks, consensusSpread: currentConsensusSpread, consensusTotal: currentConsensusTotal },
     spreadMovement, totalMovement, spreadDirection, totalDirection, velocityPerHour, maxBookDisagreement, timeline,
-    sharpIndicators: { steamMove, steamDetail, frozenLine, crossedKeyNumber, keyNumbersNear },
-    totalSharpIndicators: { totalSteamMove, totalSteamDetail, totalSteamDirection, frozenTotal, totalVelocityPerHour, highestTotalSeen, lowestTotalSeen, totalBookDisagreement },
+    sharpIndicators: { steamMove, steamDetail, consensusLine, crossedKeyNumber, keyNumbersNear },
+    totalSharpIndicators: { totalSteamMove, totalSteamDetail, totalSteamDirection, consensusTotal, totalVelocityPerHour, highestTotalSeen, lowestTotalSeen, totalBookDisagreement },
   };
 }
 
@@ -558,13 +558,13 @@ Max book disagreement: ${summary.maxBookDisagreement} pts
 
 SHARP INDICATORS:
 Steam move: ${summary.sharpIndicators.steamMove ? `YES - ${summary.sharpIndicators.steamDetail}` : 'No'}
-Frozen line: ${summary.sharpIndicators.frozenLine ? 'YES - line barely moved despite extended tracking' : 'No'}
+Consensus market: ${summary.sharpIndicators.consensusLine ? 'YES - books tightly aligned with minimal movement, market agrees on this number' : 'No'}
 Crossed key number: ${summary.sharpIndicators.crossedKeyNumber ? 'YES' : 'No'}
 Key numbers nearby: ${summary.sharpIndicators.keyNumbersNear.length ? summary.sharpIndicators.keyNumbersNear.join(', ') : 'none'}
 
 TOTALS SHARP INDICATORS:
 Total steam move: ${summary.totalSharpIndicators.totalSteamMove ? `YES - ${summary.totalSharpIndicators.totalSteamDetail} (${summary.totalSharpIndicators.totalSteamDirection})` : 'No'}
-Frozen total: ${summary.totalSharpIndicators.frozenTotal ? 'YES - total barely moved despite extended tracking' : 'No'}
+Consensus total: ${summary.totalSharpIndicators.consensusTotal ? 'YES - total market consensus with minimal movement' : 'No'}
 Total velocity: ${summary.totalSharpIndicators.totalVelocityPerHour} pts/hr
 Total book disagreement: ${summary.totalSharpIndicators.totalBookDisagreement} pts
 Highest total seen: ${summary.totalSharpIndicators.highestTotalSeen} / Lowest: ${summary.totalSharpIndicators.lowestTotalSeen}

@@ -2,7 +2,7 @@ export type GameStatus = 'upcoming' | 'live' | 'final'
 export type League = 'NBA' | 'NCAAB' | 'NHL' | 'MLB'
 export type Tournament = 'ncaa_tournament' | 'nit' | null
 export type HsaStatus = 'no_narrative' | 'narrative' | 'pending'
-export type SignalTier = 'DOUBLE NO-NARRATIVE RLM' | 'NO-NARRATIVE RLM' | 'STEAM MOVE' | 'BOOK SHADE' | 'FROZEN LINE' | 'CONTRA MOVE' | 'WATCH' | 'TRACKING' | null
+export type SignalTier = 'DOUBLE NO-NARRATIVE RLM' | 'NO-NARRATIVE RLM' | 'STEAM MOVE' | 'BOOK SHADE' | 'CONSENSUS' | 'CONTRA MOVE' | 'WATCH' | 'TRACKING' | null
 
 export interface GameView {
   id: string
@@ -85,7 +85,7 @@ export interface GameView {
 export interface FilterState {
   search: string
   league: 'all' | 'NBA' | 'NCAAB' | 'NHL' | 'MLB'
-  signal: 'all' | 'strong' | 'rlm' | 'steam' | 'frozen' | 'no_narrative' | 'tracking'
+  signal: 'all' | 'strong' | 'rlm' | 'steam' | 'consensus' | 'no_narrative' | 'tracking'
   timeBucket: 'all' | 'lt30' | '30to60' | '1to3h' | 'gt3h' | 'live' | 'final'
   actionableOnly: boolean
   sort: 'signal' | 'soonest' | 'updated'

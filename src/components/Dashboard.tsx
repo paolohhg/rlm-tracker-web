@@ -9,11 +9,11 @@ import type { GameView } from '../types';
 type StatusFilter = 'all' | 'upcoming' | 'live' | 'final';
 type LeagueFilter = 'all' | 'NBA' | 'NCAAB' | 'MLB' | 'NHL';
 type TournamentFilter = 'all' | 'ncaa_tournament' | 'nit';
-type SignalFilter = 'all' | 'rlm' | 'steam' | 'freeze' | 'resistance' | 'fake_steam';
+type SignalFilter = 'all' | 'rlm' | 'steam' | 'consensus' | 'resistance' | 'fake_steam';
 type TimeFilter = 'all' | 'lt1h' | '1to3h' | 'gt3h';
 
-function isFrozenSignal(signalTier: string | null | undefined) {
-  return signalTier === 'FROZEN LINE';
+function isConsensusSignal(signalTier: string | null | undefined) {
+  return signalTier === 'CONSENSUS';
 }
 
 function matchesSignalFilter(game: GameView, filter: SignalFilter): boolean {
@@ -21,7 +21,7 @@ function matchesSignalFilter(game: GameView, filter: SignalFilter): boolean {
     case 'all': return true;
     case 'rlm': return isRlmSignal(game.signalTier);
     case 'steam': return isSteamSignal(game.signalTier);
-    case 'freeze': return isFrozenSignal(game.signalTier);
+    case 'consensus': return isConsensusSignal(game.signalTier);
     case 'resistance': return game.isResistance;
     case 'fake_steam': return game.isFakeSteam;
   }
@@ -41,7 +41,7 @@ function matchesTimeFilter(game: GameView, filter: TimeFilter): boolean {
 
 // ── Helpers ──────────────────────────────────────────────────
 function isAlertSignal(signalTier: string | null | undefined) {
-  return !!signalTier && signalTier !== 'WATCH' && signalTier !== 'TRACKING';
+  return !!signalTier && signalTier !== 'WATCH' && signalTier !== 'TRACKING' && signalTier !== 'CONSENSUS';
 }
 
 function isRlmSignal(signalTier: string | null | undefined) {
@@ -57,9 +57,9 @@ function getSignalRank(signalTier: string | null | undefined) {
     case 'DOUBLE NO-NARRATIVE RLM': return 5;
     case 'NO-NARRATIVE RLM': return 4;
     case 'STEAM MOVE': return 3;
-    case 'FROZEN LINE': return 2;
     case 'BOOK SHADE': case 'CONTRA MOVE': return 1;
     case 'WATCH': return 0;
+    case 'CONSENSUS': return -0.5;
     default: return -1;
   }
 }
@@ -288,8 +288,8 @@ function SignalBadges({ game }: { game: GameView }) {
   if (isSteamSignal(game.signalTier)) {
     badges.push({ label: 'STEAM', color: BADGE_COLORS.STEAM });
   }
-  if (game.signalTier === 'FROZEN LINE') {
-    badges.push({ label: 'FREEZE', color: BADGE_COLORS.FREEZE });
+  if (game.signalTier === 'CONSENSUS') {
+    badges.push({ label: 'CONSENSUS', color: BADGE_COLORS.CONSENSUS });
   }
   if (game.signalTier === 'BOOK SHADE' || game.signalTier === 'CONTRA MOVE') {
     badges.push({ label: 'ALERT', color: BADGE_COLORS.ALERT });
@@ -1080,7 +1080,7 @@ export function Dashboard() {
             {/* Signal */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
               <span style={{ color: T.muted, fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font, marginRight: '2px' }}>Signal</span>
-              {([['all', 'All'], ['rlm', 'RLM'], ['steam', 'Steam'], ['freeze', 'Freeze'], ['resistance', 'Resist.'], ['fake_steam', 'Fake St.']] as [SignalFilter, string][]).map(([sf, label]) => (
+              {([['all', 'All'], ['rlm', 'RLM'], ['steam', 'Steam'], ['consensus', 'Consensus'], ['resistance', 'Resist.'], ['fake_steam', 'Fake St.']] as [SignalFilter, string][]).map(([sf, label]) => (
                 <button key={sf} onClick={() => setSignalFilter(sf)} style={filterBtnStyle(signalFilter === sf)}>
                   {label}
                 </button>

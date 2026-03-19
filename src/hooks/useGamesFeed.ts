@@ -41,7 +41,8 @@ function deriveSignalTier(tier: string | null): SignalTier {
     'NO-NARRATIVE RLM': 'NO-NARRATIVE RLM',
     'STEAM MOVE': 'STEAM MOVE',
     'BOOK SHADE': 'BOOK SHADE',
-    'FROZEN LINE': 'FROZEN LINE',
+    'CONSENSUS': 'CONSENSUS',
+    'FROZEN LINE': 'CONSENSUS',  // Legacy: remap old FROZEN LINE to CONSENSUS
     'CONTRA MOVE': 'CONTRA MOVE',
     WATCH: 'WATCH',
     TRACKING: 'TRACKING',
@@ -49,7 +50,7 @@ function deriveSignalTier(tier: string | null): SignalTier {
     'PRIME RLM ENHANCED': 'NO-NARRATIVE RLM',
     'PRIME RLM CONFIRMED': 'NO-NARRATIVE RLM',
     'PRIME RLM UNCONFIRMED': 'WATCH',
-    'FROZEN LINE (65%+ money confirmed)': 'FROZEN LINE',
+    'FROZEN LINE (65%+ money confirmed)': 'CONSENSUS',  // Legacy remap
   };
 
   return map[tier] ?? 'TRACKING';

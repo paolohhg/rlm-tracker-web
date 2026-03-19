@@ -49,7 +49,7 @@ export function deriveConfidenceLabel(signalTier: SignalTier): string {
     case 'DOUBLE NO-NARRATIVE RLM': return 'Very High';
     case 'NO-NARRATIVE RLM': return 'High';
     case 'STEAM MOVE': return 'Elevated';
-    case 'FROZEN LINE': return 'Moderate';
+    case 'CONSENSUS': return 'Low';
     case 'BOOK SHADE': return 'Moderate';
     case 'CONTRA MOVE': return 'Moderate';
     case 'WATCH': return 'Low';
@@ -82,7 +82,7 @@ function signalTierLabel(tier: SignalTier): string {
     case 'DOUBLE NO-NARRATIVE RLM': return 'Double RLM';
     case 'NO-NARRATIVE RLM': return 'Reverse Line Movement';
     case 'STEAM MOVE': return 'Steam Move';
-    case 'FROZEN LINE': return 'Frozen Line';
+    case 'CONSENSUS': return 'Consensus Market';
     case 'BOOK SHADE': return 'Book Shade';
     case 'CONTRA MOVE': return 'Contra Move';
     default: return '';
