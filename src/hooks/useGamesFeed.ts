@@ -535,6 +535,8 @@ export function useGamesFeed() {
         const currentSpread = bestOdds.current?.spread ?? null;
         const openingTotal = bestOdds.opening?.total ?? null;
         const currentTotal = bestOdds.current?.total ?? null;
+        const moneylineHome = bestOdds.current?.moneyline_home ?? null;
+        const moneylineAway = bestOdds.current?.moneyline_away ?? null;
 
         const lineMoveAmount =
           openingSpread !== null && currentSpread !== null
@@ -646,6 +648,9 @@ export function useGamesFeed() {
           marketRange: fakeSteamResult.marketRange,
           medianLine: fakeSteamResult.medianLine,
           outlierBookCount: fakeSteamResult.outlierBookCount,
+
+          moneylineHome: moneylineHome as number | null,
+          moneylineAway: moneylineAway as number | null,
 
           isLocked: t.is_locked ?? false,
           lastUpdated:

@@ -608,6 +608,25 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
         )}
       </td>
 
+      {/* ML */}
+      <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
+        {game.moneylineHome != null && game.moneylineAway != null ? (
+          <div>
+            <div style={{ color: T.textSecondary, fontSize: '11px', fontFamily: T.font }}>
+              <span style={{ color: game.moneylineAway < 0 ? T.text : T.textSecondary, fontWeight: game.moneylineAway < 0 ? 700 : 500 }}>
+                {game.moneylineAway > 0 ? '+' : ''}{game.moneylineAway}
+              </span>
+              {' / '}
+              <span style={{ color: game.moneylineHome < 0 ? T.text : T.textSecondary, fontWeight: game.moneylineHome < 0 ? 700 : 500 }}>
+                {game.moneylineHome > 0 ? '+' : ''}{game.moneylineHome}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ color: T.muted, fontSize: '13px', fontFamily: T.font }}>—</div>
+        )}
+      </td>
+
       {/* MOVE */}
       <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
         <div style={{
@@ -670,7 +689,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: T.font }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-            {['GAME', 'SPREAD', 'TOTAL', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', ''].map((col, i) => (
+            {['GAME', 'SPREAD', 'TOTAL', 'ML', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', ''].map((col, i) => (
               <th key={col || `empty-${i}`} style={{
                 padding: '10px 8px',
                 textAlign: col === 'GAME' ? 'left' : 'center',
@@ -742,27 +761,42 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
         </div>
       </div>
 
-      {/* Spread + Total + Move + Consensus */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginBottom: '10px' }}>
+      {/* Spread + Total + ML + Move + Consensus */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px', marginBottom: '10px' }}>
         <div>
-          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>{game.status === 'live' ? 'Live Spread' : 'Spread'}</div>
-          <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font, marginTop: '2px' }}>
+          <div style={{ color: T.muted, fontSize: '8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>{game.status === 'live' ? 'Live Spd' : 'Spread'}</div>
+          <div style={{ color: T.text, fontWeight: 700, fontSize: '12px', fontFamily: T.font, marginTop: '2px' }}>
             {game.currentSpread != null ? game.currentSpread : '—'}
           </div>
         </div>
         <div>
-          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>{game.status === 'live' ? 'Live Total' : 'Total'}</div>
-          <div style={{ color: T.text, fontWeight: 700, fontSize: '13px', fontFamily: T.font, marginTop: '2px' }}>
+          <div style={{ color: T.muted, fontSize: '8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>{game.status === 'live' ? 'Live Tot' : 'Total'}</div>
+          <div style={{ color: T.text, fontWeight: 700, fontSize: '12px', fontFamily: T.font, marginTop: '2px' }}>
             {game.currentTotal != null ? game.currentTotal : '—'}
           </div>
           {game.totalMove != null && game.totalMove !== 0 && (
-            <div style={{ color: Math.abs(game.totalMove) >= 1.5 ? '#ff4d4d' : T.accent, fontWeight: 600, fontSize: '10px', fontFamily: T.font }}>
+            <div style={{ color: Math.abs(game.totalMove) >= 1.5 ? '#ff4d4d' : T.accent, fontWeight: 600, fontSize: '9px', fontFamily: T.font }}>
               {game.totalMove > 0 ? '+' : ''}{game.totalMove}
             </div>
           )}
         </div>
         <div>
-          <div style={{ color: T.muted, fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>Move</div>
+          <div style={{ color: T.muted, fontSize: '8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>ML</div>
+          {game.moneylineHome != null && game.moneylineAway != null ? (
+            <div style={{ marginTop: '2px' }}>
+              <div style={{ color: game.moneylineAway < 0 ? T.text : T.textSecondary, fontWeight: game.moneylineAway < 0 ? 700 : 500, fontSize: '11px', fontFamily: T.font }}>
+                {game.moneylineAway > 0 ? '+' : ''}{game.moneylineAway}
+              </div>
+              <div style={{ color: game.moneylineHome < 0 ? T.text : T.textSecondary, fontWeight: game.moneylineHome < 0 ? 700 : 500, fontSize: '11px', fontFamily: T.font }}>
+                {game.moneylineHome > 0 ? '+' : ''}{game.moneylineHome}
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: T.muted, fontSize: '12px', fontFamily: T.font, marginTop: '2px' }}>—</div>
+          )}
+        </div>
+        <div>
+          <div style={{ color: T.muted, fontSize: '8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: T.font }}>Move</div>
           <div style={{
             color: game.lineMoveAmount != null && game.lineMoveAmount !== 0
               ? (Math.abs(game.lineMoveAmount) >= 1 ? '#ff4d4d' : T.accent)

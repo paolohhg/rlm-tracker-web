@@ -71,6 +71,10 @@ export interface GameView {
   medianLine: number | null
   outlierBookCount: number | null
 
+  // Moneyline
+  moneylineHome: number | null
+  moneylineAway: number | null
+
   isLocked: boolean
   lastUpdated: string
 }
