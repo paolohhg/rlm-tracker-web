@@ -93,8 +93,9 @@ export function computeResistance(input: ResistanceInput): ResistanceResult {
   if (hasTime) {
     isResistance = score >= 4;
   } else {
-    // Without time: score >= 3 AND must include consensus + movement points
-    isResistance = score >= 3 && publicPct >= 70 && moveTowardPublic < 0.5;
+    // Without time data we can score max 5 (2 consensus + 3 movement).
+    // Require score >= 4 AND active counter-movement to prevent false positives.
+    isResistance = score >= 4 && publicPct >= 70 && moveTowardPublic < 0;
   }
 
   // Reason string

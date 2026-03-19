@@ -21,7 +21,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (gameResult && typeof gameResult === 'string') query = query.eq('game_result', gameResult);
 
     const { data, error } = await query;
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('[heard2h-games GET]', error.message);
+      return res.status(500).json({ error: error.message });
+    }
     return res.status(200).json({ games: data });
   }
 
@@ -56,7 +59,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select()
       .single();
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('[heard2h-games POST]', error.message);
+      return res.status(500).json({ error: error.message });
+    }
     return res.status(201).json({ game: data });
   }
 
@@ -77,7 +83,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select()
       .single();
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('[heard2h-games PATCH]', error.message);
+      return res.status(500).json({ error: error.message });
+    }
     return res.status(200).json({ game: data });
   }
 

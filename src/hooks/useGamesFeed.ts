@@ -189,9 +189,11 @@ function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
   };
 }
 
-type EspnScoreEntry = { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null };
+type EspnScoreEntry = { homeScore: number; awayScore: number; status: string; period: number | null; clock: string | null; cachedAt: number };
 
 // Persist scores across polls — once ESPN drops a finished game, we keep the last known score
+// Entries older than 6 hours are evicted to prevent unbounded memory growth
+const ESPN_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const espnScoreCache: Record<string, EspnScoreEntry> = {};
 
 type EspnGameEntry = {
@@ -318,6 +320,7 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
           status: espnStatus,
           period: comp.status?.period ?? null,
           clock: comp.status?.displayClock ?? null,
+          cachedAt: Date.now(),
         };
 
         // Index under all name variations so DB names match regardless of format
@@ -344,8 +347,17 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
     } catch { /* silently skip if ESPN is unreachable */ }
   }));
 
-  // Merge fresh data into persistent cache (never evict — keeps final scores after game drops off scoreboard)
+  // Merge fresh data into persistent cache
   Object.assign(espnScoreCache, map);
+
+  // Evict entries older than TTL to prevent unbounded memory growth
+  const now = Date.now();
+  for (const key of Object.keys(espnScoreCache)) {
+    if (now - espnScoreCache[key].cachedAt > ESPN_CACHE_TTL_MS) {
+      delete espnScoreCache[key];
+    }
+  }
+
   return espnScoreCache;
 }
 
@@ -356,9 +368,6 @@ export function useGamesFeed() {
 
   const fetchGames = useCallback(async () => {
     try {
-      // Fire-and-forget: refresh splits from Action Network on each load
-      fetch('/api/fetch-splits').catch(() => {});
-
       const [
         tipoffRes,
         alertsRes,

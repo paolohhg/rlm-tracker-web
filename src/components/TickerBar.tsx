@@ -36,26 +36,10 @@ export default function TickerBar() {
   async function handleFetchScoresNow() {
     try {
       setLoading(true);
-      setMessage('Fetching fresh scores...');
-
-      const { data, error } = await supabase.functions.invoke('fetch-scores-espn', {
-        body: {},
-      });
-
-      if (error) {
-        console.error('fetch-scores-espn invoke error:', error);
-        setMessage('Score fetch failed');
-        return;
-      }
-
-      console.log('fetch-scores-espn response:', data);
+      setMessage('Refreshing scores...');
 
       await fetchLiveGames();
       setMessage('Scores updated');
-
-      setTimeout(() => {
-        window.location.reload();
-      }, 700);
     } catch (err) {
       console.error('Manual score fetch failed:', err);
       setMessage('Score fetch failed');

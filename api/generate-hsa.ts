@@ -153,7 +153,7 @@ interface NormalizedOddsRow {
 const TOTAL_SANITY_BOUNDS: Record<string, { min: number; max: number }> = {
   NBA:   { min: 180, max: 280 },
   NCAAB: { min: 100, max: 220 },
-  MLB:   { min: 4, max: 16 },
+  MLB:   { min: 4, max: 20 },
   NHL:   { min: 3.5, max: 9.5 },
 };
 
@@ -626,7 +626,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (existing?.length && !force) {
       const age = Date.now() - new Date(existing[0].created_at).getTime();
       const twoHours = 2 * 60 * 60 * 1000;
-      if (age < twoHours && existing[0].analysis) {
+      // Invalidate cache if game has likely started since analysis was created
+      const gameStart = new Date(game_time).getTime();
+      const analysisCreated = new Date(existing[0].created_at).getTime();
+      const gameStartedSinceAnalysis = analysisCreated < gameStart && Date.now() >= gameStart;
+
+      if (age < twoHours && existing[0].analysis && !gameStartedSinceAnalysis) {
         return res.status(200).json({
           narrative: existing[0].analysis,
           cached: true,
