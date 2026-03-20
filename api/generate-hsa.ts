@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
-import { analyzeGameMarkets, type MarketAnalysis } from './lib/market-lifecycle-engine';
+// Dynamic import to prevent module-load crash if lifecycle engine has issues
+type MarketAnalysis = import('./lib/market-lifecycle-engine').MarketAnalysis;
 
 // ── HSA System Prompt (inlined to avoid Vercel bundler issues) ────
 
@@ -845,6 +846,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     let lifecycleBlock = '';
     try {
+      const { analyzeGameMarkets } = await import('./lib/market-lifecycle-engine');
       lifecycle = analyzeGameMarkets(
         cleanSnapshots as any,
         league,

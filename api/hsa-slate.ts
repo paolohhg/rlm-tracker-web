@@ -19,7 +19,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { analyzeGameMarkets, type MarketAnalysis } from './lib/market-lifecycle-engine';
+// Dynamic import to prevent module-load crash on Vercel serverless
+type MarketAnalysis = import('./lib/market-lifecycle-engine').MarketAnalysis;
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -428,6 +429,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         spread: null, total: null, moneyline: null,
       };
       try {
+        const { analyzeGameMarkets } = await import('./lib/market-lifecycle-engine');
         lifecycleRaw = analyzeGameMarkets(sorted, league, homeTeam, awayTeam);
       } catch (lcErr: any) {
         console.error(`[HSA-SLATE] Lifecycle failed for ${homeTeam} (non-fatal):`, lcErr.message);
