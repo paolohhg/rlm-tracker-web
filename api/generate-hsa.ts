@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
+import { analyzeGameMarkets, type MarketAnalysis } from './lib/market-lifecycle-engine';
 
 // ── HSA System Prompt (inlined to avoid Vercel bundler issues) ────
 
@@ -832,14 +833,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // ── Lifecycle analysis (full-path model) ───────────────────────
+    // Run the lifecycle engine on all snapshots to get structural context,
+    // primary signal, and current state for each market.
+    // This prevents the STABILIZATION→PASS bug where quiet recent windows
+    // erase meaningful prior signals.
+    const lifecycle = analyzeGameMarkets(
+      cleanSnapshots as any,
+      league,
+      home_team,
+      away_team,
+    );
+
+    // Build lifecycle context block for the prompt
+    const lifecycleBlock = buildLifecycleContext(lifecycle);
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
+
+    // Append lifecycle context as a structured section
+    const fullMessage = userMessage + '\n\n' + lifecycleBlock;
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
       system: HSA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      messages: [{ role: 'user', content: fullMessage }],
     });
 
     const rawText =
@@ -893,6 +912,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totals_open: totalsOpen,
       totals_current: totalsCurrent,
       totals_move: totalsMove,
+      // Lifecycle analysis attached for downstream consumers
+      lifecycle: {
+        spread: lifecycle.spread ? marketAnalysisSummary(lifecycle.spread) : null,
+        total: lifecycle.total ? marketAnalysisSummary(lifecycle.total) : null,
+        moneyline: lifecycle.moneyline ? marketAnalysisSummary(lifecycle.moneyline) : null,
+      },
       input_tokens: response.usage?.input_tokens,
       output_tokens: response.usage?.output_tokens,
     });
@@ -903,4 +928,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       detail: err.message,
     });
   }
+}
+
+// ── Lifecycle Context Builder ─────────────────────────────────────────────
+// Generates a structured text block injected into the HSA prompt so Claude
+// respects the full lifecycle model. Enforces the hard rule: if a meaningful
+// primary signal exists, the market must NEVER be labeled PASS.
+
+function buildLifecycleContext(lifecycle: {
+  spread: MarketAnalysis | null;
+  total: MarketAnalysis | null;
+  moneyline: MarketAnalysis | null;
+}): string {
+  const sections: string[] = ['=== MARKET LIFECYCLE ANALYSIS (FULL HISTORY) ==='];
+  sections.push('IMPORTANT: The lifecycle analysis below reflects the FULL line history from opening to current.');
+  sections.push('If a primary signal exists (state != QUIET), you MUST NOT classify that market as PASS.');
+  sections.push('Recent quiet periods = STABILIZATION, not PASS. Respect the primary signal.\n');
+
+  for (const [label, m] of [
+    ['SPREAD', lifecycle.spread],
+    ['TOTAL', lifecycle.total],
+    ['MONEYLINE', lifecycle.moneyline],
+  ] as [string, MarketAnalysis | null][]) {
+    if (!m) {
+      sections.push(`${label}: No data`);
+      continue;
+    }
+
+    const ps = m.primary_signal;
+    const cs = m.current_state;
+    const sc = m.structural_context;
+
+    sections.push(`${label} LIFECYCLE:`);
+    sections.push(`  Opening: ${m.opening_line} → Current: ${m.current_line} (total move: ${sc.total_move_from_open > 0 ? '+' : ''}${sc.total_move_from_open})`);
+    sections.push(`  Primary Signal: ${ps.state} | Direction: ${ps.direction} | Distance: ${ps.distance} | Books: ${ps.books_involved} | Velocity: ${ps.velocity_per_hour}/hr`);
+    sections.push(`  Signal Window: ${ps.start_line} → ${ps.end_line} (${ps.start_time} to ${ps.end_time})`);
+    sections.push(`  Current State: ${cs.state} | Move since primary: ${cs.move_since_primary} | Holding: ${cs.holding_near_level} | Books aligned: ${cs.books_aligned_now}`);
+    sections.push(`  Retracement: ${sc.percent_retraced.toFixed(0)}% | Time at band: ${sc.time_at_current_band_minutes}min`);
+    sections.push(`  Recent: last 30m ${m.move_last_30m > 0 ? '+' : ''}${m.move_last_30m} | last 2h ${m.move_last_2h > 0 ? '+' : ''}${m.move_last_2h} | last 8h ${m.move_last_8h > 0 ? '+' : ''}${m.move_last_8h}`);
+    sections.push(`  Lifecycle Read: ${m.final_read.signal_status} | Lean: ${m.final_read.market_lean} | Confidence: ${m.final_read.confidence}`);
+    sections.push(`  Summary: ${m.final_read.summary_mode}`);
+    sections.push('');
+  }
+
+  return sections.join('\n');
+}
+
+/** Compact summary of a MarketAnalysis for the API response */
+function marketAnalysisSummary(m: MarketAnalysis) {
+  return {
+    market_type: m.market_type,
+    opening_line: m.opening_line,
+    current_line: m.current_line,
+    primary_signal: m.primary_signal,
+    current_state: m.current_state,
+    structural_context: m.structural_context,
+    data_quality: m.data_quality,
+    final_read: m.final_read,
+  };
 }

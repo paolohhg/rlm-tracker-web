@@ -19,6 +19,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { analyzeGameMarkets, type MarketAnalysis } from './lib/market-lifecycle-engine';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL!,
@@ -109,6 +110,13 @@ interface HsaGameObject {
   has_splits: boolean;
   has_alerts: boolean;
   insufficient_data: boolean;
+
+  // Lifecycle analysis (full-path model)
+  lifecycle: {
+    spread: Pick<MarketAnalysis, 'primary_signal' | 'current_state' | 'structural_context' | 'data_quality' | 'final_read'> | null;
+    total: Pick<MarketAnalysis, 'primary_signal' | 'current_state' | 'structural_context' | 'data_quality' | 'final_read'> | null;
+    moneyline: Pick<MarketAnalysis, 'primary_signal' | 'current_state' | 'structural_context' | 'data_quality' | 'final_read'> | null;
+  };
 }
 
 const PASS_READ: PerMarketRead = {
@@ -413,6 +421,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       } catch { /* non-critical */ }
 
+      // ── Lifecycle analysis (full-path model) ─────────────────────────
+      const lifecycleRaw = analyzeGameMarkets(sorted, league, homeTeam, awayTeam);
+      const lifecyclePick = (m: MarketAnalysis | null) => m ? {
+        primary_signal: m.primary_signal,
+        current_state: m.current_state,
+        structural_context: m.structural_context,
+        data_quality: m.data_quality,
+        final_read: m.final_read,
+      } : null;
+
       games.push({
         canonical_game_id,
         league,
@@ -449,6 +467,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         has_splits: hasSplits,
         has_alerts: hasAlerts,
         insufficient_data: insufficientData,
+        // Lifecycle analysis
+        lifecycle: {
+          spread: lifecyclePick(lifecycleRaw.spread),
+          total: lifecyclePick(lifecycleRaw.total),
+          moneyline: lifecyclePick(lifecycleRaw.moneyline),
+        },
       });
     }
 

@@ -1,8 +1,15 @@
+import { useState } from 'react';
 import { Dashboard } from './components/Dashboard';
+import { OvernightReport } from './components/OvernightReport';
+import { OvernightReportAdmin } from './components/OvernightReportAdmin';
 
 const FONT = 'Inter, "Segoe UI", Arial, sans-serif';
 
+type View = 'dashboard' | 'morning-report' | 'admin';
+
 export default function App() {
+  const [view, setView] = useState<View>('dashboard');
+
   return (
     <div style={{ background: '#0b0f19', minHeight: '100vh' }}>
       {/* Top Nav Bar */}
@@ -31,9 +38,40 @@ export default function App() {
             </span>
           </div>
         </div>
+
+        {/* Nav tabs */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          <NavTab label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+          <NavTab label="Morning Report" active={view === 'morning-report'} onClick={() => setView('morning-report')} />
+          <NavTab label="Admin" active={view === 'admin'} onClick={() => setView('admin')} subtle />
+        </div>
       </div>
 
-      <Dashboard />
+      {view === 'dashboard' && <Dashboard />}
+      {view === 'morning-report' && <OvernightReport />}
+      {view === 'admin' && <OvernightReportAdmin />}
     </div>
+  );
+}
+
+function NavTab({ label, active, onClick, subtle }: { label: string; active: boolean; onClick: () => void; subtle?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '6px 14px',
+        borderRadius: 6,
+        border: 'none',
+        cursor: 'pointer',
+        fontFamily: FONT,
+        fontSize: 13,
+        fontWeight: active ? 700 : 500,
+        background: active ? '#00e5ff' : 'transparent',
+        color: active ? '#0b0f19' : subtle ? '#64748b' : '#94a3b8',
+        transition: 'all 0.15s',
+      }}
+    >
+      {label}
+    </button>
   );
 }
