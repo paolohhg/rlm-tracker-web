@@ -838,15 +838,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // primary signal, and current state for each market.
     // This prevents the STABILIZATION→PASS bug where quiet recent windows
     // erase meaningful prior signals.
-    const lifecycle = analyzeGameMarkets(
-      cleanSnapshots as any,
-      league,
-      home_team,
-      away_team,
-    );
-
-    // Build lifecycle context block for the prompt
-    const lifecycleBlock = buildLifecycleContext(lifecycle);
+    // Wrapped in try/catch: if lifecycle fails, HSA still generates using
+    // the existing summarizer — lifecycle context is additive, not required.
+    let lifecycle: { spread: MarketAnalysis | null; total: MarketAnalysis | null; moneyline: MarketAnalysis | null } = {
+      spread: null, total: null, moneyline: null,
+    };
+    let lifecycleBlock = '';
+    try {
+      lifecycle = analyzeGameMarkets(
+        cleanSnapshots as any,
+        league,
+        home_team,
+        away_team,
+      );
+      lifecycleBlock = buildLifecycleContext(lifecycle);
+    } catch (lcErr: any) {
+      console.error('[HSA] Lifecycle analysis failed (non-fatal):', lcErr.message);
+    }
 
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);

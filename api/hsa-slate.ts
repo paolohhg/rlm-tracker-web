@@ -422,7 +422,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } catch { /* non-critical */ }
 
       // ── Lifecycle analysis (full-path model) ─────────────────────────
-      const lifecycleRaw = analyzeGameMarkets(sorted, league, homeTeam, awayTeam);
+      // Wrapped in try/catch: if lifecycle fails, slate still returns all
+      // other data — lifecycle is additive enhancement.
+      let lifecycleRaw: { spread: MarketAnalysis | null; total: MarketAnalysis | null; moneyline: MarketAnalysis | null } = {
+        spread: null, total: null, moneyline: null,
+      };
+      try {
+        lifecycleRaw = analyzeGameMarkets(sorted, league, homeTeam, awayTeam);
+      } catch (lcErr: any) {
+        console.error(`[HSA-SLATE] Lifecycle failed for ${homeTeam} (non-fatal):`, lcErr.message);
+      }
       const lifecyclePick = (m: MarketAnalysis | null) => m ? {
         primary_signal: m.primary_signal,
         current_state: m.current_state,
