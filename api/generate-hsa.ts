@@ -69,7 +69,7 @@ Heard Sports Analysis
 HSI SIGNAL SUMMARY
 Reverse Line Movement: [Yes/No - if Yes, state which side the line moved TOWARD despite public on the other side, e.g. "Yes - line moved toward Warriors +7 despite 62% public on Celtics"]
 Steam Move: [Yes/No - if Yes, state the direction and magnitude, e.g. "Yes - 1.5-point move toward Under 218 in 20 minutes"]
-Book Alignment: [Describe book consensus or disagreement with specific direction, e.g. "All three books moved toward Hawks +3.5" or "DraftKings shading 1 point lower than FanDuel"]
+Book Alignment: [Name every book. State which moved, which held, and the lead book. e.g. "DraftKings led move to Hawks +3.5, ESPNBet and BetMGM followed within 20 min, FanDuel held +4" or "All 4 books (DraftKings, FanDuel, BetMGM, ESPNBet) aligned at Hawks +3.5"]
 Public Bias: [REQUIRED FORMAT - Two parts separated by a pipe. Part 1: State public side with ticket %. Part 2: State the SHARP SIDE explicitly. Examples:
 "Public: 68% tickets on Celtics | Sharp side: Warriors +7.5 (reverse line movement + money divergence)"
 "Public: 55% tickets on Hawks | Sharp side: No divergence detected - public and sharp aligned on Hawks"
@@ -80,10 +80,10 @@ Market Lean: [Specific team + number or Over/Under + number, e.g. "Warriors +7.5
 Confidence: [Low / Moderate / High]
 
 1. Line Movement
-Describe the opening spread vs current spread, disagreement between sportsbooks, and how the line has moved across the market. Explain if the movement crossed key numbers or represents meaningful price discovery.
+Describe the opening spread vs current spread with per-book detail. Name which books moved the spread and which held. State the exact move path per book when available (e.g. "DraftKings: -7 → -7.5, FanDuel: -7 → -7.5"). Explain if the movement crossed key numbers or represents meaningful price discovery.
 
 2. Book Behavior
-Describe how sportsbooks reacted to market activity. Explain whether books appear to be respecting action, protecting positions, or aligning with market consensus.
+Name every sportsbook that moved and every sportsbook that held. State which book moved first (lead book) and which followed. Include exact move paths per book (e.g. "DraftKings moved -7 → -7.5, FanDuel followed -7 → -7.5, while BetMGM held -7"). State the time window of coordination. Do NOT use generic phrases like "books coordinated" — name every book explicitly.
 
 3. Public Positioning
 Interpret ticket percentage vs money percentage. Identify any divergence between recreational betting patterns and larger wagers.
@@ -98,7 +98,17 @@ State clearly which side the market pressure is pointing toward, including the s
 List factors that would strengthen or weaken the current market interpretation. Examples: line moving further in current direction, line reversing direction, public percentages shifting significantly, additional steam moves.
 
 7. Totals Intel
-Analyze totals market behavior separately. State the specific total number and whether sportsbook behavior leans Over or Under, with confidence level (Low / Moderate / High). If totals movement shows stronger signals than the spread, clearly state that. If no totals signal exists, say PASS.
+Analyze totals market behavior with explicit sportsbook attribution. You MUST include:
+- Exact sportsbook names that moved the total (e.g. "DraftKings, ESPNBet, and BetMGM moved the total from 151 to 151.5")
+- How many books moved out of total tracked (e.g. "3/4 books")
+- Which book moved first (lead book) if detectable
+- Which books followed
+- Exact move path (e.g. "151 → 151.5")
+- Time window of coordination (e.g. "within 27 minutes")
+- Which books did NOT move (e.g. "while FanDuel held 151")
+- Whether the totals signal is stronger than the spread signal
+State confidence level (Low / Moderate / High). If no totals signal exists, say PASS.
+Do NOT use generic phrases like "books coordinated on totals" or "market moved". Name every book.
 
 End with: Disclaimer: For research purposes only.
 
@@ -109,7 +119,13 @@ Never describe an analysis as a betting opportunity.
 Never use gambling tout language.
 Describe what the market is doing, not what someone should do.
 The Public Bias field MUST always contain "Sharp side:" with an explicit conclusion. Vague descriptions of public percentages without a sharp-side verdict are not acceptable.
-The Market Lean field MUST always name a specific team + number, Over/Under + number, or PASS. Never leave it directionally ambiguous.`;
+The Market Lean field MUST always name a specific team + number, Over/Under + number, or PASS. Never leave it directionally ambiguous.
+
+CRITICAL SPORTSBOOK ATTRIBUTION RULE
+Every section that discusses line movement MUST name exact sportsbooks.
+Never write generic phrases like "books moved", "multiple sportsbooks", "sportsbooks coordinated", or "market shifted".
+Always write: "[BookName], [BookName], and [BookName] moved X → Y within Z minutes, while [BookName] held X."
+Use the BOOK COORDINATION INTEL section provided in the input data as your source of truth for which books moved, held, led, and followed.`;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -503,6 +519,164 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   };
 }
 
+// ── Per-Book Coordination Intel ───────────────────────────────────
+
+interface BookMoveDetail {
+  book: string;
+  openLine: number;
+  currentLine: number;
+  move: number;
+  /** Timestamp of first snapshot for this book */
+  firstAt: string;
+  /** Timestamp of last snapshot for this book */
+  lastAt: string;
+}
+
+interface MarketCoordination {
+  /** Books that moved in the consensus direction */
+  movedBooks: BookMoveDetail[];
+  /** Books that did not move (or moved against consensus) */
+  heldBooks: BookMoveDetail[];
+  /** Lead book — the one whose last snapshot is earliest among movers */
+  leadBook: string | null;
+  /** Follow books — movers other than the lead */
+  followBooks: string[];
+  /** Time window in minutes between first and last mover */
+  timeWindowMinutes: number;
+  /** Total books tracked */
+  totalBooks: number;
+  /** Consensus direction description */
+  direction: string;
+  /** Move path string, e.g. "151 → 151.5" */
+  movePath: string;
+}
+
+function computeBookCoordination(
+  sorted: OddsSnapshot[],
+  openingByBook: Record<string, OddsSnapshot>,
+  currentByBook: Record<string, OddsSnapshot>,
+  market: 'total' | 'spread' | 'moneyline',
+): MarketCoordination | null {
+  const books = Object.keys(currentByBook);
+  if (books.length === 0) return null;
+
+  // Extract per-book open/current values
+  const details: BookMoveDetail[] = [];
+  for (const book of books) {
+    const open = openingByBook[book];
+    const curr = currentByBook[book];
+    if (!open || !curr) continue;
+
+    let openLine: number, currentLine: number;
+    if (market === 'total') {
+      openLine = open.total;
+      currentLine = curr.total;
+    } else if (market === 'spread') {
+      openLine = open.spread;
+      currentLine = curr.spread;
+    } else {
+      openLine = open.moneyline_home;
+      currentLine = curr.moneyline_home;
+    }
+
+    if (openLine === 0 && currentLine === 0) continue;
+
+    details.push({
+      book,
+      openLine: round1(openLine),
+      currentLine: round1(currentLine),
+      move: round1(currentLine - openLine),
+      firstAt: open.fetched_at,
+      lastAt: curr.fetched_at,
+    });
+  }
+
+  if (details.length === 0) return null;
+
+  // Consensus direction
+  const moves = details.map(d => d.move).filter(m => m !== 0);
+  if (moves.length === 0) return null;
+  const consensusSign = Math.sign(moves.reduce((a, b) => a + b, 0));
+  if (consensusSign === 0) return null;
+
+  const threshold = market === 'moneyline' ? 5 : 0.3;
+
+  const movedBooks = details.filter(d => Math.sign(d.move) === consensusSign && Math.abs(d.move) >= threshold);
+  const heldBooks = details.filter(d => !movedBooks.includes(d));
+
+  if (movedBooks.length === 0) return null;
+
+  // Lead book = mover whose latest snapshot timestamp is earliest (moved first)
+  const sortedMovers = [...movedBooks].sort(
+    (a, b) => new Date(a.lastAt).getTime() - new Date(b.lastAt).getTime()
+  );
+  const leadBook = sortedMovers[0]?.book ?? null;
+  const followBooks = sortedMovers.slice(1).map(b => b.book);
+
+  // Time window
+  const timestamps = movedBooks.map(b => new Date(b.lastAt).getTime());
+  const windowMin = Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 60000);
+
+  // Direction label
+  let direction: string;
+  if (market === 'total') {
+    direction = consensusSign > 0 ? 'Over' : 'Under';
+  } else if (market === 'spread') {
+    direction = consensusSign < 0 ? 'toward home favorite' : 'toward away underdog';
+  } else {
+    direction = consensusSign > 0 ? 'toward home' : 'toward away';
+  }
+
+  // Move path (average opening → average current among movers)
+  const avgOpen = round1(avg(movedBooks.map(b => b.openLine)));
+  const avgCurr = round1(avg(movedBooks.map(b => b.currentLine)));
+  const movePath = `${avgOpen} → ${avgCurr}`;
+
+  return {
+    movedBooks, heldBooks, leadBook, followBooks,
+    timeWindowMinutes: windowMin,
+    totalBooks: details.length,
+    direction, movePath,
+  };
+}
+
+function formatCoordinationBlock(
+  label: string,
+  coord: MarketCoordination | null,
+): string {
+  if (!coord || coord.movedBooks.length === 0) return `${label} COORDINATION: No meaningful book coordination detected.`;
+
+  const lines: string[] = [`${label} COORDINATION:`];
+  const movedNames = coord.movedBooks.map(b => b.book).join(', ');
+  const ratio = `${coord.movedBooks.length}/${coord.totalBooks}`;
+  lines.push(`  Books moved: ${movedNames} (${ratio} books)`);
+  lines.push(`  Move path: ${coord.movePath} (${coord.direction})`);
+  lines.push(`  Time window: ${coord.timeWindowMinutes} minutes`);
+
+  if (coord.leadBook) {
+    lines.push(`  Lead book: ${coord.leadBook}`);
+  }
+  if (coord.followBooks.length > 0) {
+    lines.push(`  Followed by: ${coord.followBooks.join(', ')}`);
+  }
+
+  if (coord.heldBooks.length > 0) {
+    const heldNames = coord.heldBooks.map(b => `${b.book} (held ${b.openLine})`).join(', ');
+    lines.push(`  Books held: ${heldNames}`);
+  }
+
+  // Per-book detail
+  lines.push('  Per-book detail:');
+  for (const b of coord.movedBooks) {
+    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${b.move > 0 ? '+' : ''}${b.move})`);
+  }
+  for (const b of coord.heldBooks) {
+    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (held)`);
+  }
+
+  return lines.join('\n');
+}
+
 // ── HSA User Message Builder ──────────────────────────────────────
 
 function buildHsaUserMessage(
@@ -858,11 +1032,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[HSA] Lifecycle analysis failed (non-fatal):', lcErr.message);
     }
 
+    // ── Per-book coordination intel ─────────────────────────────────
+    // Compute which specific books moved, led, followed, or held for
+    // each market. This feeds concrete sportsbook names into the prompt
+    // so the LLM produces exact attribution instead of generic prose.
+    const coordSorted = [...cleanSnapshots].sort(
+      (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
+    );
+    const coordOpenByBook: Record<string, OddsSnapshot> = {};
+    const coordCurrByBook: Record<string, OddsSnapshot> = {};
+    for (const s of coordSorted) {
+      if (!coordOpenByBook[s.bookmaker]) coordOpenByBook[s.bookmaker] = s;
+      coordCurrByBook[s.bookmaker] = s;
+    }
+
+    const totalCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'total');
+    const spreadCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'spread');
+    const mlCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'moneyline');
+
+    const coordBlock = [
+      '\n=== BOOK COORDINATION INTEL (USE EXACT BOOK NAMES IN OUTPUT) ===',
+      'IMPORTANT: Use the exact sportsbook names, counts, move paths, and time windows below in your analysis sections.',
+      'Do NOT paraphrase with generic phrases like "books coordinated" or "multiple sportsbooks moved".',
+      'Name every book that moved, name every book that held, and state the exact move path and time window.\n',
+      formatCoordinationBlock('TOTALS', totalCoord),
+      '',
+      formatCoordinationBlock('SPREAD', spreadCoord),
+      '',
+      formatCoordinationBlock('MONEYLINE', mlCoord),
+    ].join('\n');
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context as a structured section
-    const fullMessage = userMessage + '\n\n' + lifecycleBlock;
+    // Append lifecycle context and coordination intel as structured sections
+    const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock;
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
