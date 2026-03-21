@@ -26,6 +26,10 @@ interface ActionOdds {
   total_under_public?: number;
   total_over_money?: number;
   total_under_money?: number;
+  ml_home_public?: number;
+  ml_away_public?: number;
+  ml_home_money?: number;
+  ml_away_money?: number;
   num_bets?: number;
   book_id: number;
 }
@@ -52,6 +56,10 @@ interface SplitRow {
   total_under_ticket_pct: number | null;
   total_over_money_pct: number | null;
   total_under_money_pct: number | null;
+  ml_home_ticket_pct: number | null;
+  ml_away_ticket_pct: number | null;
+  ml_home_money_pct: number | null;
+  ml_away_money_pct: number | null;
   num_bets: number | null;
   fetched_at: string;
 }
@@ -111,6 +119,10 @@ async function fetchLeagueSplits(league: string, date: string): Promise<SplitRow
       total_under_ticket_pct: odds.total_under_public ?? null,
       total_over_money_pct: odds.total_over_money ?? null,
       total_under_money_pct: odds.total_under_money ?? null,
+      ml_home_ticket_pct: odds.ml_home_public ?? null,
+      ml_away_ticket_pct: odds.ml_away_public ?? null,
+      ml_home_money_pct: odds.ml_home_money ?? null,
+      ml_away_money_pct: odds.ml_away_money ?? null,
       num_bets: odds.num_bets ?? g.num_bets ?? null,
       fetched_at: now,
     });
@@ -157,7 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (insertError && insertError.message.includes('column')) {
         console.warn(`Retrying ${league} insert with base columns only:`, insertError.message);
-        const baseRows = rows.map(({ total_over_ticket_pct, total_under_ticket_pct, total_over_money_pct, total_under_money_pct, num_bets, ...rest }) => rest);
+        const baseRows = rows.map(({ total_over_ticket_pct, total_under_ticket_pct, total_over_money_pct, total_under_money_pct, ml_home_ticket_pct, ml_away_ticket_pct, ml_home_money_pct, ml_away_money_pct, num_bets, ...rest }) => rest);
         const retry = await supabase.from('splits_snapshots').insert(baseRows);
         insertError = retry.error;
       }

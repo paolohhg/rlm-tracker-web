@@ -3,6 +3,7 @@ import { useGamesFeed } from '../hooks/useGamesFeed';
 import { useGenerateHsa } from '../hooks/useGenerateHsa';
 // useHMCycles import removed — HM Cycles hidden for now
 import { ShareStudio } from './ShareStudio';
+import { ProReport } from './ProReport';
 import { T, BADGE_COLORS, STATUS_TAG_COLORS, CONFIDENCE_COLORS } from '../lib/theme';
 import type { GameView } from '../types';
 
@@ -513,7 +514,7 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
 }
 
 // ── Desktop Table Row ────────────────────────────────────────
-function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void }) {
+function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare, onProReport }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void; onProReport: (game: GameView) => void }) {
   const [hovered, setHovered] = useState(false);
 
   const spreadDisplay = () => {
@@ -671,34 +672,53 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
         <IntelBadges game={game} />
       </td>
 
-      {/* SHARE — pregame only */}
+      {/* PRO + SHARE */}
       <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
-        <button
-          onClick={(e) => { e.stopPropagation(); if (game.status === 'upcoming') onShare(game); }}
-          disabled={game.status !== 'upcoming'}
-          style={{
-            background: 'transparent',
-            border: `1px solid ${T.border}`,
-            color: game.status === 'upcoming' ? T.textSecondary : T.muted,
-            borderRadius: '6px',
-            padding: '5px 10px',
-            cursor: game.status === 'upcoming' ? 'pointer' : 'not-allowed',
-            fontWeight: 600,
-            fontSize: '11px',
-            fontFamily: T.font,
-            whiteSpace: 'nowrap',
-            opacity: game.status === 'upcoming' ? 1 : 0.4,
-          }}
-        >
-          Share
-        </button>
+        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onProReport(game); }}
+            style={{
+              background: 'rgba(0, 102, 255, 0.15)',
+              border: '1px solid rgba(0, 102, 255, 0.4)',
+              color: '#4d94ff',
+              borderRadius: '6px',
+              padding: '5px 10px',
+              cursor: 'pointer',
+              fontWeight: 800,
+              fontSize: '11px',
+              fontFamily: T.font,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            PRO
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); if (game.status === 'upcoming') onShare(game); }}
+            disabled={game.status !== 'upcoming'}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${T.border}`,
+              color: game.status === 'upcoming' ? T.textSecondary : T.muted,
+              borderRadius: '6px',
+              padding: '5px 10px',
+              cursor: game.status === 'upcoming' ? 'pointer' : 'not-allowed',
+              fontWeight: 600,
+              fontSize: '11px',
+              fontFamily: T.font,
+              whiteSpace: 'nowrap',
+              opacity: game.status === 'upcoming' ? 1 : 0.4,
+            }}
+          >
+            Share
+          </button>
+        </div>
       </td>
     </tr>
   );
 }
 
 // ── Desktop Table ────────────────────────────────────────────
-function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[]; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void }) {
+function GameTable({ games, ncaabLogos, onOpenHsa, onShare, onProReport }: { games: GameView[]; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void; onProReport: (game: GameView) => void }) {
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: T.font }}>
@@ -722,7 +742,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[
         </thead>
         <tbody>
           {games.map((game) => (
-            <GameTableRow key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={onOpenHsa} onShare={onShare} />
+            <GameTableRow key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={onOpenHsa} onShare={onShare} onProReport={onProReport} />
           ))}
         </tbody>
       </table>
@@ -731,7 +751,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[
 }
 
 // ── Mobile Card ──────────────────────────────────────────────
-function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void }) {
+function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare, onProReport }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void; onProReport: (game: GameView) => void }) {
   return (
     <div
       onClick={() => onOpenHsa(game)}
@@ -851,8 +871,24 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
         <div style={{ color: '#facc15', fontSize: '11px', fontWeight: 500, marginTop: '4px', fontFamily: T.font }}>{game.fakeSteamReason}</div>
       )}
 
-      {/* Actions — Share is pregame only */}
+      {/* Actions */}
       <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); onProReport(game); }}
+          style={{
+            background: 'rgba(0, 102, 255, 0.15)',
+            border: '1px solid rgba(0, 102, 255, 0.4)',
+            color: '#4d94ff',
+            borderRadius: '6px',
+            padding: '6px 10px',
+            cursor: 'pointer',
+            fontWeight: 800,
+            fontSize: '11px',
+            fontFamily: T.font,
+          }}
+        >
+          PRO
+        </button>
         {game.status === 'upcoming' && (
           <button
             onClick={(e) => { e.stopPropagation(); onShare(game); }}
@@ -897,6 +933,7 @@ export function Dashboard() {
   const [hsaGame, setHsaGame] = useState<GameView | null>(null);
   // const [logCycleGame, setLogCycleGame] = useState<GameView | null>(null); // HM Cycles hidden
   const [shareStudioGame, setShareStudioGame] = useState<GameView | null>(null);
+  const [proReportGame, setProReportGame] = useState<GameView | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
@@ -1119,12 +1156,12 @@ export function Dashboard() {
         ) : isMobile ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {filteredGames.map((game) => (
-              <MobileGameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onShare={setShareStudioGame} />
+              <MobileGameCard key={game.id} game={game} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onShare={setShareStudioGame} onProReport={setProReportGame} />
             ))}
           </div>
         ) : (
           <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: '10px', overflow: 'hidden' }}>
-            <GameTable games={filteredGames} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onShare={setShareStudioGame} />
+            <GameTable games={filteredGames} ncaabLogos={ncaabLogos} onOpenHsa={setHsaGame} onShare={setShareStudioGame} onProReport={setProReportGame} />
           </div>
         )}
       </div>
@@ -1132,6 +1169,7 @@ export function Dashboard() {
       {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={refresh} />}
       {/* logCycleGame modal removed — HM Cycles hidden for now */}
       {shareStudioGame && <ShareStudio game={shareStudioGame} onClose={() => setShareStudioGame(null)} />}
+      {proReportGame && <ProReport game={proReportGame} onClose={() => setProReportGame(null)} />}
     </div>
   );
 }

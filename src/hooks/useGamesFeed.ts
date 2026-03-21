@@ -714,6 +714,11 @@ export function useGamesFeed() {
           moneylineAway: moneylineAway as number | null,
           mlMoveHome: mlMoveHome as number | null,
 
+          mlHomeTicketPct: split?.ml_home_ticket_pct ?? null,
+          mlAwayTicketPct: split?.ml_away_ticket_pct ?? null,
+          mlHomeMoneyPct: split?.ml_home_money_pct ?? null,
+          mlAwayMoneyPct: split?.ml_away_money_pct ?? null,
+
           isLocked: t.is_locked ?? false,
           lastUpdated:
             alert?.detected_at ??

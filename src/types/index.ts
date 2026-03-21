@@ -78,6 +78,12 @@ export interface GameView {
   moneylineAway: number | null
   mlMoveHome: number | null
 
+  // Moneyline splits
+  mlHomeTicketPct: number | null
+  mlAwayTicketPct: number | null
+  mlHomeMoneyPct: number | null
+  mlAwayMoneyPct: number | null
+
   isLocked: boolean
   lastUpdated: string
 }
