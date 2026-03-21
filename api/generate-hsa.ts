@@ -80,10 +80,10 @@ Market Lean: [Specific team + number or Over/Under + number, e.g. "Warriors +7.5
 Confidence: [Low / Moderate / High]
 
 1. Line Movement
-Describe the opening spread vs current spread with per-book detail. Name which books moved the spread and which held. State the exact move path per book when available (e.g. "DraftKings: -7 → -7.5, FanDuel: -7 → -7.5"). Explain if the movement crossed key numbers or represents meaningful price discovery.
+Start by copying the MANDATORY SENTENCE from the SPREAD COORDINATION section verbatim. Then describe disagreement between books, whether the movement crossed key numbers, and price discovery context. Do not replace the mandatory sentence with generic language.
 
 2. Book Behavior
-Name every sportsbook that moved and every sportsbook that held. State which book moved first (lead book) and which followed. Include exact move paths per book (e.g. "DraftKings moved -7 → -7.5, FanDuel followed -7 → -7.5, while BetMGM held -7"). State the time window of coordination. Do NOT use generic phrases like "books coordinated" — name every book explicitly.
+Start by copying the MANDATORY SENTENCE from the SPREAD COORDINATION section verbatim if not already used in section 1. Then add the MANDATORY SENTENCE from the MONEYLINE COORDINATION section if available. Describe the time window and whether books appear to be respecting action or protecting positions. Do NOT use generic phrases like "books coordinated" — the mandatory sentences already name every book.
 
 3. Public Positioning
 Interpret ticket percentage vs money percentage. Identify any divergence between recreational betting patterns and larger wagers.
@@ -98,17 +98,7 @@ State clearly which side the market pressure is pointing toward, including the s
 List factors that would strengthen or weaken the current market interpretation. Examples: line moving further in current direction, line reversing direction, public percentages shifting significantly, additional steam moves.
 
 7. Totals Intel
-Analyze totals market behavior with explicit sportsbook attribution. You MUST include:
-- Exact sportsbook names that moved the total (e.g. "DraftKings, ESPNBet, and BetMGM moved the total from 151 to 151.5")
-- How many books moved out of total tracked (e.g. "3/4 books")
-- Which book moved first (lead book) if detectable
-- Which books followed
-- Exact move path (e.g. "151 → 151.5")
-- Time window of coordination (e.g. "within 27 minutes")
-- Which books did NOT move (e.g. "while FanDuel held 151")
-- Whether the totals signal is stronger than the spread signal
-State confidence level (Low / Moderate / High). If no totals signal exists, say PASS.
-Do NOT use generic phrases like "books coordinated on totals" or "market moved". Name every book.
+Start this section by copying the MANDATORY SENTENCE from the TOTALS COORDINATION section verbatim. Then add your analysis around it. You MUST include the pre-rendered sentence exactly as provided — do not paraphrase it, do not replace book names with "multiple books" or "several sportsbooks". After the mandatory sentence, add whether the totals signal is stronger than the spread signal, and state confidence level (Low / Moderate / High). If no totals signal exists, say PASS.
 
 End with: Disclaimer: For research purposes only.
 
@@ -688,7 +678,7 @@ function formatCoordinationBlock(
   }
 
   // Per-book detail
-  lines.push('  Per-book move detail (USE THESE EXACT VALUES IN YOUR OUTPUT):');
+  lines.push('  Per-book move detail:');
   for (const b of coord.movedBooks) {
     lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${b.move > 0 ? '+' : ''}${b.move}) [MOVED]`);
   }
@@ -697,7 +687,42 @@ function formatCoordinationBlock(
     lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${moveLabel}) [HELD]`);
   }
 
+  // Pre-rendered sentence the LLM MUST include verbatim
+  lines.push('');
+  lines.push(`  >>> MANDATORY SENTENCE FOR ${label} (copy this verbatim into your ${label === 'TOTALS' ? 'section 7 Totals Intel' : label === 'SPREAD' ? 'section 2 Book Behavior' : 'section 2 Book Behavior'} output): <<<`);
+  lines.push(`  "${renderPrewrittenSentence(coord)}"`);
+
   return lines.join('\n');
+}
+
+/** Pre-render a complete sentence the LLM must paste verbatim. */
+function renderPrewrittenSentence(coord: MarketCoordination): string {
+  const movedNames = formatNameList(coord.movedBooks.map(b => b.book));
+  const ratio = `${coord.movedBooks.length}/${coord.totalBooks}`;
+  const windowStr = coord.timeWindowMinutes < 1 ? 'within the same polling window' : `within ${coord.timeWindowMinutes} minutes`;
+
+  let sentence = `${movedNames} moved the ${coord.direction.toLowerCase().includes('over') || coord.direction.toLowerCase().includes('under') ? 'total' : 'line'} ${coord.movePath} (${ratio}-book move ${windowStr})`;
+
+  if (coord.heldBooks.length > 0) {
+    const heldNames = formatNameList(coord.heldBooks.map(b => b.book));
+    const heldLines = coord.heldBooks.map(b => `${b.currentLine}`);
+    sentence += `, while ${heldNames} held at ${heldLines.join('/')}`;
+  }
+  sentence += '.';
+
+  if (coord.leadBook && coord.followBooks.length > 0) {
+    sentence += ` ${coord.leadBook} led the move; ${formatNameList(coord.followBooks)} followed.`;
+  }
+
+  return sentence;
+}
+
+/** Format ["A", "B", "C"] as "A, B, and C" */
+function formatNameList(names: string[]): string {
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 }
 
 // ── HSA User Message Builder ──────────────────────────────────────
@@ -1097,10 +1122,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Build raw per-book lines as a fallback so Claude always has book names
     const rawBookLines: string[] = ['BOOKS TRACKED: ' + summary.books.join(', ')];
-    rawBookLines.push('PER-BOOK CURRENT LINES (use these book names in your output):');
+    rawBookLines.push('PER-BOOK OPENING → CURRENT LINES:');
     for (const b of summary.current.books) {
       const openBook = summary.opening.books.find(ob => ob.book === b.book);
-      rawBookLines.push(`  ${b.book}: spread ${openBook?.spread ?? '?'} → ${b.spread} | total ${openBook?.total ?? '?'} → ${b.total} | ML ${openBook?.mlHome ?? '?'} → ${b.mlHome}`);
+      const totalOpen = openBook?.total ?? 0;
+      const totalCurr = b.total;
+      const totalMoved = totalOpen > 0 && totalCurr > 0 && totalOpen !== totalCurr;
+      const spreadOpen = openBook?.spread ?? 0;
+      const spreadCurr = b.spread;
+      const spreadMoved = spreadOpen !== 0 && spreadCurr !== 0 && spreadOpen !== spreadCurr;
+      rawBookLines.push(`  ${b.book}: spread ${spreadOpen} → ${spreadCurr}${spreadMoved ? ' [MOVED]' : ' [HELD]'} | total ${totalOpen} → ${totalCurr}${totalMoved ? ' [MOVED]' : ' [HELD]'} | ML ${openBook?.mlHome ?? '?'} → ${b.mlHome}`);
+    }
+
+    // Generate fallback mandatory sentences from raw summary data if coordination returned null
+    if (!totalCoord && summary.current.books.length > 0) {
+      const totalMovers = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.total > 0 && b.total > 0 && ob.total !== b.total;
+      });
+      const totalHolders = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.total > 0 && b.total > 0 && ob.total === b.total;
+      });
+      if (totalMovers.length > 0) {
+        const moverNames = formatNameList(totalMovers.map(b => b.book));
+        const holderPart = totalHolders.length > 0
+          ? `, while ${formatNameList(totalHolders.map(b => b.book))} held at ${totalHolders[0]?.total}`
+          : '';
+        const sampleOpen = summary.opening.books.find(o => o.book === totalMovers[0].book)?.total ?? '?';
+        rawBookLines.push('');
+        rawBookLines.push(`  >>> FALLBACK MANDATORY SENTENCE FOR TOTALS (copy verbatim into section 7): <<<`);
+        rawBookLines.push(`  "${moverNames} moved the total from ${sampleOpen} to ${totalMovers[0].total} (${totalMovers.length}/${summary.current.books.length}-book move)${holderPart}."`);
+      }
+    }
+    if (!spreadCoord && summary.current.books.length > 0) {
+      const spreadMovers = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.spread !== 0 && b.spread !== 0 && ob.spread !== b.spread;
+      });
+      const spreadHolders = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.spread !== 0 && b.spread !== 0 && ob.spread === b.spread;
+      });
+      if (spreadMovers.length > 0) {
+        const moverNames = formatNameList(spreadMovers.map(b => b.book));
+        const holderPart = spreadHolders.length > 0
+          ? `, while ${formatNameList(spreadHolders.map(b => b.book))} held at ${spreadHolders[0]?.spread}`
+          : '';
+        const sampleOpen = summary.opening.books.find(o => o.book === spreadMovers[0].book)?.spread ?? '?';
+        rawBookLines.push('');
+        rawBookLines.push(`  >>> FALLBACK MANDATORY SENTENCE FOR SPREAD (copy verbatim into section 1): <<<`);
+        rawBookLines.push(`  "${moverNames} moved the spread from ${sampleOpen} to ${spreadMovers[0].spread} (${spreadMovers.length}/${summary.current.books.length}-book move)${holderPart}."`);
+      }
     }
 
     const coordBlock = [
