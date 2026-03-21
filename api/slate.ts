@@ -161,6 +161,30 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+/** Map raw lowercase bookmaker keys to proper display names */
+const BOOK_DISPLAY_NAMES: Record<string, string> = {
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  betmgm: 'BetMGM',
+  pinnacle: 'Pinnacle',
+  espnbet: 'ESPNBet',
+  caesars: 'Caesars',
+  pointsbetus: 'PointsBet',
+  circa: 'Circa',
+  bookmaker: 'Bookmaker',
+  heritage: 'Heritage',
+  betrivers: 'BetRivers',
+  unibet: 'Unibet',
+  wynnbet: 'WynnBET',
+  superbook: 'SuperBook',
+  hardrock: 'Hard Rock',
+  fanatics: 'Fanatics',
+};
+
+function displayBookName(raw: string): string {
+  return BOOK_DISPLAY_NAMES[raw.toLowerCase()] || raw;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const leagueFilter = req.query.league as string | undefined;
@@ -278,7 +302,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const currentBooks: BookLine[] = Object.entries(currentByBook).map(([book, s]) => ({
-        book,
+        book: displayBookName(book),
         spread: s.spread,
         spread_price: s.spread_home_price,
         total: s.total,
