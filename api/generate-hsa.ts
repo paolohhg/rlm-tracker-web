@@ -530,6 +530,8 @@ interface BookMoveDetail {
   firstAt: string;
   /** Timestamp of last snapshot for this book */
   lastAt: string;
+  /** Timestamp of first snapshot where line actually changed from opening */
+  firstMoveAt: string;
 }
 
 interface MarketCoordination {
@@ -560,6 +562,13 @@ function computeBookCoordination(
   const books = Object.keys(currentByBook);
   if (books.length === 0) return null;
 
+  // Helper: extract the market value from a snapshot
+  function val(s: OddsSnapshot): number {
+    if (market === 'total') return s.total;
+    if (market === 'spread') return s.spread;
+    return s.moneyline_home;
+  }
+
   // Extract per-book open/current values
   const details: BookMoveDetail[] = [];
   for (const book of books) {
@@ -567,27 +576,35 @@ function computeBookCoordination(
     const curr = currentByBook[book];
     if (!open || !curr) continue;
 
-    let openLine: number, currentLine: number;
-    if (market === 'total') {
-      openLine = open.total;
-      currentLine = curr.total;
-    } else if (market === 'spread') {
-      openLine = open.spread;
-      currentLine = curr.spread;
+    const openLine = round1(val(open));
+    const currentLine = round1(val(curr));
+
+    // Skip books with zeroed/missing lines (e.g. total zeroed by classification filter)
+    if (market === 'moneyline') {
+      if (openLine === 0 && currentLine === 0) continue;
     } else {
-      openLine = open.moneyline_home;
-      currentLine = curr.moneyline_home;
+      if (openLine === 0 || currentLine === 0) continue;
     }
 
-    if (openLine === 0 && currentLine === 0) continue;
+    // Find when this book FIRST moved away from its opening line
+    const bookSnaps = sorted.filter(s => s.bookmaker === book);
+    let firstMoveAt = curr.fetched_at; // fallback
+    for (const snap of bookSnaps) {
+      const snapVal = round1(val(snap));
+      if (snapVal !== 0 && snapVal !== openLine) {
+        firstMoveAt = snap.fetched_at;
+        break;
+      }
+    }
 
     details.push({
       book,
-      openLine: round1(openLine),
-      currentLine: round1(currentLine),
+      openLine,
+      currentLine,
       move: round1(currentLine - openLine),
       firstAt: open.fetched_at,
       lastAt: curr.fetched_at,
+      firstMoveAt,
     });
   }
 
@@ -599,16 +616,17 @@ function computeBookCoordination(
   const consensusSign = Math.sign(moves.reduce((a, b) => a + b, 0));
   if (consensusSign === 0) return null;
 
-  const threshold = market === 'moneyline' ? 5 : 0.3;
+  // Use a low threshold so we capture books that moved even slightly
+  const threshold = market === 'moneyline' ? 3 : 0.1;
 
   const movedBooks = details.filter(d => Math.sign(d.move) === consensusSign && Math.abs(d.move) >= threshold);
   const heldBooks = details.filter(d => !movedBooks.includes(d));
 
   if (movedBooks.length === 0) return null;
 
-  // Lead book = mover whose latest snapshot timestamp is earliest (moved first)
+  // Lead book = mover whose line changed earliest (firstMoveAt)
   const sortedMovers = [...movedBooks].sort(
-    (a, b) => new Date(a.lastAt).getTime() - new Date(b.lastAt).getTime()
+    (a, b) => new Date(a.firstMoveAt).getTime() - new Date(b.firstMoveAt).getTime()
   );
   const leadBook = sortedMovers[0]?.book ?? null;
   const followBooks = sortedMovers.slice(1).map(b => b.book);
@@ -644,34 +662,39 @@ function formatCoordinationBlock(
   label: string,
   coord: MarketCoordination | null,
 ): string {
-  if (!coord || coord.movedBooks.length === 0) return `${label} COORDINATION: No meaningful book coordination detected.`;
+  if (!coord || coord.movedBooks.length === 0) {
+    return `${label} COORDINATION: No meaningful book coordination detected.\n  All books held their opening lines.`;
+  }
 
   const lines: string[] = [`${label} COORDINATION:`];
   const movedNames = coord.movedBooks.map(b => b.book).join(', ');
   const ratio = `${coord.movedBooks.length}/${coord.totalBooks}`;
-  lines.push(`  Books moved: ${movedNames} (${ratio} books)`);
+  lines.push(`  Books moved (${ratio}): ${movedNames}`);
   lines.push(`  Move path: ${coord.movePath} (${coord.direction})`);
   lines.push(`  Time window: ${coord.timeWindowMinutes} minutes`);
 
   if (coord.leadBook) {
-    lines.push(`  Lead book: ${coord.leadBook}`);
+    lines.push(`  Lead book (moved first): ${coord.leadBook}`);
   }
   if (coord.followBooks.length > 0) {
     lines.push(`  Followed by: ${coord.followBooks.join(', ')}`);
   }
 
   if (coord.heldBooks.length > 0) {
-    const heldNames = coord.heldBooks.map(b => `${b.book} (held ${b.openLine})`).join(', ');
-    lines.push(`  Books held: ${heldNames}`);
+    const heldNames = coord.heldBooks.map(b => `${b.book} (still at ${b.currentLine})`).join(', ');
+    lines.push(`  Books that DID NOT move: ${heldNames}`);
+  } else {
+    lines.push(`  ALL ${coord.totalBooks} books moved — no holdouts`);
   }
 
   // Per-book detail
-  lines.push('  Per-book detail:');
+  lines.push('  Per-book move detail (USE THESE EXACT VALUES IN YOUR OUTPUT):');
   for (const b of coord.movedBooks) {
-    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${b.move > 0 ? '+' : ''}${b.move})`);
+    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${b.move > 0 ? '+' : ''}${b.move}) [MOVED]`);
   }
   for (const b of coord.heldBooks) {
-    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (held)`);
+    const moveLabel = b.move === 0 ? 'unchanged' : `${b.move > 0 ? '+' : ''}${b.move}, against consensus`;
+    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${moveLabel}) [HELD]`);
   }
 
   return lines.join('\n');
@@ -1050,6 +1073,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const spreadCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'spread');
     const mlCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'moneyline');
 
+    // Debug: log coordination results
+    console.log(`[HSA COORD] Total: ${totalCoord ? `${totalCoord.movedBooks.length}/${totalCoord.totalBooks} moved (${totalCoord.movedBooks.map(b => b.book).join(', ')}) | held: ${totalCoord.heldBooks.map(b => b.book).join(', ') || 'none'} | lead: ${totalCoord.leadBook}` : 'null'}`);
+    console.log(`[HSA COORD] Spread: ${spreadCoord ? `${spreadCoord.movedBooks.length}/${spreadCoord.totalBooks} moved (${spreadCoord.movedBooks.map(b => b.book).join(', ')})` : 'null'}`);
+    console.log(`[HSA COORD] ML: ${mlCoord ? `${mlCoord.movedBooks.length}/${mlCoord.totalBooks} moved` : 'null'}`);
+
     const coordBlock = [
       '\n=== BOOK COORDINATION INTEL (USE EXACT BOOK NAMES IN OUTPUT) ===',
       'IMPORTANT: Use the exact sportsbook names, counts, move paths, and time windows below in your analysis sections.',
@@ -1061,6 +1089,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       '',
       formatCoordinationBlock('MONEYLINE', mlCoord),
     ].join('\n');
+
+    console.log(`[HSA COORD BLOCK]\n${coordBlock}`);
 
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
