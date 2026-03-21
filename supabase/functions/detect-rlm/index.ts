@@ -113,7 +113,7 @@ interface GameFacts {
   // Book-level detail for display
   bookSpreads: { open: number; current: number; book: string }[];
   bookMLs: { openML: number; currML: number; openProb: number; currProb: number; book: string }[];
-  bookTotals: { open: number; current: number; book: string }[];
+  bookTotals: { open: number; current: number; book: string; firstAt: string; lastAt: string }[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -238,7 +238,7 @@ async function buildGameFacts(
 
   // ── Layer 3: Totals ─────────────────────────────────────────────
   const totalMovements: number[] = [];
-  const bookTotals: { open: number; current: number; book: string }[] = [];
+  const bookTotals: { open: number; current: number; book: string; firstAt: string; lastAt: string }[] = [];
 
   for (const [book, bookSnaps] of Object.entries(bookMap)) {
     if (bookSnaps.length < 2) continue;
@@ -247,7 +247,11 @@ async function buildGameFacts(
     if (openTotal != null && currTotal != null) {
       const move = parseFloat((currTotal - openTotal).toFixed(1));
       totalMovements.push(move);
-      bookTotals.push({ open: openTotal, current: currTotal, book });
+      bookTotals.push({
+        open: openTotal, current: currTotal, book,
+        firstAt: bookSnaps[0].fetched_at,
+        lastAt: bookSnaps[bookSnaps.length - 1].fetched_at,
+      });
     }
   }
 
@@ -472,12 +476,43 @@ function evaluateMLSignal(gf: GameFacts): LayerSignal {
 function evaluateTotalSignal(gf: GameFacts): LayerSignal {
   if (gf.total.hasMeaningfulMove) {
     const steamVel = gf.isMLPrimary ? 0.5 : 1.0;
-    if (gf.total.booksAgreeing >= 3 && gf.total.velocity >= steamVel) return "STEAM";
+    // STEAM requires 2+ books moving within a tight time window (< 60 min)
+    const movedBooks = getMovedBooks(gf);
+    const timeWindowMin = movedBooks.timeWindowMinutes;
+    if (movedBooks.count >= 2 && timeWindowMin < 60 && gf.total.velocity >= steamVel) return "STEAM";
     if (gf.total.booksAgreeing >= 2) return "SHADE";
     return "MINOR";
   }
   if (gf.total.hasMinorMove) return "MINOR";
   return "NONE";
+}
+
+/** Compute which books moved totals in the consensus direction. */
+function getMovedBooks(gf: GameFacts): {
+  count: number;
+  names: string[];
+  timeWindowMinutes: number;
+} {
+  const direction = Math.sign(gf.consensusTotalMove);
+  const threshold = gf.totalThreshold * 0.5;
+  const moved = gf.bookTotals.filter(b => {
+    const move = b.current - b.open;
+    return Math.sign(move) === direction && Math.abs(move) >= threshold;
+  });
+  if (moved.length === 0) return { count: 0, names: [], timeWindowMinutes: Infinity };
+
+  // Time window = span between earliest and latest move timestamps among moved books
+  const timestamps = moved.map(b => new Date(b.lastAt).getTime());
+  const earliest = Math.min(...timestamps);
+  const latest = Math.max(...timestamps);
+  const windowMs = latest - earliest;
+  const windowMin = windowMs / (1000 * 60);
+
+  return {
+    count: moved.length,
+    names: moved.map(b => b.book),
+    timeWindowMinutes: windowMin,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -535,11 +570,19 @@ function buildSideRead(gf: GameFacts, signal: LayerSignal): MarketRead {
   };
 }
 
-function buildTotalRead(gf: GameFacts, signal: LayerSignal): MarketRead {
-  if (signal === "NONE" && !gf.total.hasMinorMove) return { ...PASS_READ };
+function buildTotalRead(gf: GameFacts, signal: LayerSignal): MarketRead & {
+  total_books_moved: number;
+  total_books_list: string[];
+  total_move_time_window: number;
+  total_velocity: number;
+} {
+  const defaultCoord = { total_books_moved: 0, total_books_list: [] as string[], total_move_time_window: 0, total_velocity: 0 };
+  if (signal === "NONE" && !gf.total.hasMinorMove) return { ...PASS_READ, ...defaultCoord };
 
   const direction = gf.consensusTotalMove < 0 ? "Under" : "Over";
   const leanDisplay = gf.currentTotal != null ? `${direction} ${gf.currentTotal}` : direction;
+  const moved = getMovedBooks(gf);
+  const moveDelta = gf.consensusTotalMove > 0 ? `+${gf.consensusTotalMove.toFixed(1)}` : gf.consensusTotalMove.toFixed(1);
 
   let score = 0;
   let sigType = "NO_EDGE";
@@ -548,16 +591,21 @@ function buildTotalRead(gf: GameFacts, signal: LayerSignal): MarketRead {
   if (signal === "STEAM") {
     score = 70;
     sigType = "STEAM_TOTAL";
-    reasons.push(`Coordinated total steam: ${gf.total.booksAgreeing} books moved ${direction.toLowerCase()}.`);
-    reasons.push(`Total: ${gf.openTotal} → ${gf.currentTotal} (${gf.consensusTotalMove > 0 ? "+" : ""}${gf.consensusTotalMove.toFixed(1)}).`);
+    const bookList = moved.names.join(", ");
+    const ratio = `${moved.count}/${gf.bookTotals.length}`;
+    const windowStr = moved.timeWindowMinutes < 1 ? "<1 min" : `${Math.round(moved.timeWindowMinutes)} min`;
+    reasons.push(`Coordinated steam: ${ratio} books (${bookList}) moved ${direction}. Total: ${gf.openTotal} → ${gf.currentTotal} (${moveDelta}). Velocity: ${moveDelta} in ${windowStr}.`);
   } else if (signal === "SHADE") {
     score = 35;
     sigType = "SHARP_ACCUMULATION_TOTAL";
-    reasons.push(`${gf.total.booksAgreeing} books moved total ${direction.toLowerCase()}: ${gf.openTotal} → ${gf.currentTotal}.`);
+    const bookList = moved.names.join(", ");
+    const ratio = `${moved.count}/${gf.bookTotals.length}`;
+    const windowStr = moved.timeWindowMinutes < 1 ? "<1 min" : `${Math.round(moved.timeWindowMinutes)} min`;
+    reasons.push(`Sharp accumulation: ${ratio} books (${bookList}) moved total ${direction.toLowerCase()}. ${gf.openTotal} → ${gf.currentTotal} (${moveDelta}) over ${windowStr}.`);
   } else if (signal === "MINOR") {
     score = 15;
     sigType = "NO_EDGE";
-    reasons.push(`Minor total movement ${direction.toLowerCase()}: ${gf.openTotal ?? "?"} → ${gf.currentTotal ?? "?"} (${gf.consensusTotalMove > 0 ? "+" : ""}${gf.consensusTotalMove.toFixed(1)}).`);
+    reasons.push(`Minor total movement ${direction.toLowerCase()}: ${gf.openTotal ?? "?"} → ${gf.currentTotal ?? "?"} (${moveDelta}).`);
   }
 
   if (gf.spread.hasMinorMove || gf.ml.hasMinorMove) score += 5;
@@ -568,6 +616,10 @@ function buildTotalRead(gf: GameFacts, signal: LayerSignal): MarketRead {
     confidence: conf,
     signal_type: sigType,
     summary_reason: reasons.join(" "),
+    total_books_moved: moved.count,
+    total_books_list: moved.names,
+    total_move_time_window: Math.round(moved.timeWindowMinutes),
+    total_velocity: parseFloat(gf.totalVelocity.toFixed(2)),
   };
 }
 
@@ -937,6 +989,12 @@ function buildAlert(
     total_confidence: safeTotal.confidence,
     total_signal_type: safeTotal.signal_type,
     total_summary: safeTotal.summary_reason,
+
+    // ── Total coordination details ──
+    total_books_moved: totalRead.total_books_moved ?? 0,
+    total_books_list: (totalRead.total_books_list ?? []).join(", ") || null,
+    total_move_time_window: totalRead.total_move_time_window ?? null,
+    total_velocity: totalRead.total_velocity ?? null,
 
     ml_lean: safeML.lean,
     ml_confidence: safeML.confidence,
