@@ -741,6 +741,10 @@ function postProcessBookNames(
   // Build book detail sentences
   const totalSentence = buildBookSentence(totalCoord, summary, 'total');
   const spreadSentence = buildBookSentence(spreadCoord, summary, 'spread');
+  console.log(`[HSA POST-PROCESS] totalSentence: ${totalSentence ?? 'NULL'}`);
+  console.log(`[HSA POST-PROCESS] spreadSentence: ${spreadSentence ?? 'NULL'}`);
+  console.log(`[HSA POST-PROCESS] summary.current.books count: ${summary.current.books.length}, totals: ${summary.current.books.map(b => `${b.book}=${b.total}`).join(', ')}`);
+  console.log(`[HSA POST-PROCESS] summary.opening.books count: ${summary.opening.books.length}, totals: ${summary.opening.books.map(b => `${b.book}=${b.total}`).join(', ')}`);
 
   // Helper: inject sentence right after a section header
   // Handles both "7. Totals Intel\nText..." and "7. Totals Intel Text..." formats
@@ -786,41 +790,57 @@ function buildBookSentence(
   if (market === 'total') {
     const movers: string[] = [];
     const holders: string[] = [];
+    const currentPositions: string[] = [];
     for (const b of books) {
+      if (b.total <= 0) continue;
+      currentPositions.push(`${b.book} at ${b.total}`);
       const ob = summary.opening.books.find(o => o.book === b.book);
-      if (!ob || ob.total <= 0 || b.total <= 0) continue;
+      if (!ob || ob.total <= 0) continue;
       if (ob.total !== b.total) {
         movers.push(`${b.book}: ${ob.total} → ${b.total}`);
       } else {
         holders.push(`${b.book} held at ${b.total}`);
       }
     }
-    if (movers.length === 0 && holders.length === 0) return null;
-    if (movers.length === 0) {
-      return `All books held their totals: ${holders.join(', ')}.`;
+    // If we have movement data, use it
+    if (movers.length > 0 || holders.length > 0) {
+      if (movers.length === 0) {
+        return `All books held their totals: ${holders.join(', ')}.`;
+      }
+      return [...movers, ...holders].join(', ') + '.';
     }
-    const parts = [...movers, ...holders];
-    return parts.join(', ') + '.';
+    // Fallback: just list current positions
+    if (currentPositions.length > 0) {
+      return `Current totals: ${currentPositions.join(', ')}.`;
+    }
+    return null;
   }
 
   // spread
   const movers: string[] = [];
   const holders: string[] = [];
+  const currentPositions: string[] = [];
   for (const b of books) {
+    if (b.spread === 0) continue;
+    currentPositions.push(`${b.book} at ${b.spread}`);
     const ob = summary.opening.books.find(o => o.book === b.book);
-    if (!ob || ob.spread === 0 || b.spread === 0) continue;
+    if (!ob || ob.spread === 0) continue;
     if (ob.spread !== b.spread) {
       movers.push(`${b.book}: ${ob.spread} → ${b.spread}`);
     } else {
       holders.push(`${b.book} held at ${b.spread}`);
     }
   }
-  if (movers.length === 0 && holders.length === 0) return null;
-  if (movers.length === 0) {
-    return `All books held their spreads: ${holders.join(', ')}.`;
+  if (movers.length > 0 || holders.length > 0) {
+    if (movers.length === 0) {
+      return `All books held their spreads: ${holders.join(', ')}.`;
+    }
+    return [...movers, ...holders].join(', ') + '.';
   }
-  const parts = [...movers, ...holders];
-  return parts.join(', ') + '.';
+  if (currentPositions.length > 0) {
+    return `Current spreads: ${currentPositions.join(', ')}.`;
+  }
+  return null;
 }
 
 // ── HSA User Message Builder ──────────────────────────────────────
