@@ -726,8 +726,9 @@ function formatNameList(names: string[]): string {
 }
 
 /**
- * Post-process LLM output to replace generic book references with actual names.
- * This is the nuclear option: the LLM refuses to name books, so we do it ourselves.
+ * Post-process LLM output to inject pre-rendered book attribution sentences.
+ * The LLM consistently refuses to name sportsbooks, so we inject the detail
+ * directly after each section header regardless of what the LLM wrote.
  */
 function postProcessBookNames(
   text: string,
@@ -737,78 +738,91 @@ function postProcessBookNames(
 ): string {
   let result = text;
 
-  // Generic phrases to detect and replace
-  const genericPatterns = [
-    /(?:across |at )(?:multiple|several|most|all|the tracked|the major|many) (?:sports)?books?\b(?:\s+(?:simultaneously|in unison|together|at once))?/gi,
-    /(?:multiple|several|most|all|the tracked|the major|many) (?:sports)?books?\s+(?:moved|aligned|converged|shifted|adjusted|coordinated|showing|show)\b/gi,
-    /books?\s+(?:aligning|aligning at|aligned at|converging at|converged at|settling at)\s+([\d.]+)/gi,
-    /(?:multiple|several|most|all) books?\s+(?:are |now )?(?:at|showing|posted at)\s+([\d.]+)/gi,
-  ];
+  // Build book detail sentences
+  const totalSentence = buildBookSentence(totalCoord, summary, 'total');
+  const spreadSentence = buildBookSentence(spreadCoord, summary, 'spread');
 
-  // Build replacement text based on coordination data
-  const buildTotalReplacement = (): string | null => {
-    if (totalCoord && totalCoord.movedBooks.length > 0) {
-      return renderPrewrittenSentence(totalCoord);
-    }
-    // Fallback from summary
-    const books = summary.current.books.filter(b => b.total > 0);
-    if (books.length === 0) return null;
-    const names = formatNameList(books.map(b => b.book));
-    const vals = [...new Set(books.map(b => b.total))];
-    if (vals.length === 1) {
-      return `${names} are all at ${vals[0]}`;
-    }
-    return `${books.map(b => `${b.book} at ${b.total}`).join(', ')}`;
-  };
+  // Inject after section headers using regex
+  // Section 7: Totals Intel — inject total book details
+  if (totalSentence) {
+    result = result.replace(
+      /(7\.\s*Totals Intel\n)/i,
+      `$1Book detail: ${totalSentence}\n`,
+    );
+  }
 
-  const buildSpreadReplacement = (): string | null => {
-    if (spreadCoord && spreadCoord.movedBooks.length > 0) {
-      return renderPrewrittenSentence(spreadCoord);
-    }
-    const books = summary.current.books.filter(b => b.spread !== 0);
-    if (books.length === 0) return null;
-    return `${books.map(b => `${b.book} at ${b.spread}`).join(', ')}`;
-  };
+  // Section 2: Book Behavior — inject spread book details
+  if (spreadSentence) {
+    result = result.replace(
+      /(2\.\s*Book Behavior\n)/i,
+      `$1Book detail: ${spreadSentence}\n`,
+    );
+  }
 
-  // Split text into sections by "7. Totals Intel" to apply context-appropriate replacements
-  const totalsIdx = result.search(/7\.\s*Totals Intel/i);
-
-  if (totalsIdx >= 0) {
-    const beforeTotals = result.slice(0, totalsIdx);
-    let totalsSection = result.slice(totalsIdx);
-
-    // Replace generic phrases in totals section
-    const totalReplacement = buildTotalReplacement();
-    if (totalReplacement) {
-      for (const pattern of genericPatterns) {
-        pattern.lastIndex = 0;
-        totalsSection = totalsSection.replace(pattern, totalReplacement);
-      }
-    }
-
-    // Replace generic phrases in pre-totals sections (spread context)
-    let spreadSection = beforeTotals;
-    const spreadReplacement = buildSpreadReplacement();
-    if (spreadReplacement) {
-      for (const pattern of genericPatterns) {
-        pattern.lastIndex = 0;
-        spreadSection = spreadSection.replace(pattern, spreadReplacement);
-      }
-    }
-
-    result = spreadSection + totalsSection;
-  } else {
-    // No totals section found; apply total replacement globally as best effort
-    const totalReplacement = buildTotalReplacement();
-    if (totalReplacement) {
-      for (const pattern of genericPatterns) {
-        pattern.lastIndex = 0;
-        result = result.replace(pattern, totalReplacement);
-      }
-    }
+  // Section 1: Line Movement — inject spread book details
+  if (spreadSentence) {
+    result = result.replace(
+      /(1\.\s*Line Movement\n)/i,
+      `$1Book detail: ${spreadSentence}\n`,
+    );
   }
 
   return result;
+}
+
+/** Build a book attribution sentence from coordination data or raw summary fallback. */
+function buildBookSentence(
+  coord: MarketCoordination | null,
+  summary: OddsSummary,
+  market: 'total' | 'spread',
+): string | null {
+  // If coordination computed successfully, use renderPrewrittenSentence
+  if (coord && coord.movedBooks.length > 0) {
+    return renderPrewrittenSentence(coord);
+  }
+
+  // Fallback: build from raw summary data
+  const books = summary.current.books;
+  if (books.length === 0) return null;
+
+  if (market === 'total') {
+    const movers: string[] = [];
+    const holders: string[] = [];
+    for (const b of books) {
+      const ob = summary.opening.books.find(o => o.book === b.book);
+      if (!ob || ob.total <= 0 || b.total <= 0) continue;
+      if (ob.total !== b.total) {
+        movers.push(`${b.book}: ${ob.total} → ${b.total}`);
+      } else {
+        holders.push(`${b.book} held at ${b.total}`);
+      }
+    }
+    if (movers.length === 0 && holders.length === 0) return null;
+    if (movers.length === 0) {
+      return `All books held their totals: ${holders.join(', ')}.`;
+    }
+    const parts = [...movers, ...holders];
+    return parts.join(', ') + '.';
+  }
+
+  // spread
+  const movers: string[] = [];
+  const holders: string[] = [];
+  for (const b of books) {
+    const ob = summary.opening.books.find(o => o.book === b.book);
+    if (!ob || ob.spread === 0 || b.spread === 0) continue;
+    if (ob.spread !== b.spread) {
+      movers.push(`${b.book}: ${ob.spread} → ${b.spread}`);
+    } else {
+      holders.push(`${b.book} held at ${b.spread}`);
+    }
+  }
+  if (movers.length === 0 && holders.length === 0) return null;
+  if (movers.length === 0) {
+    return `All books held their spreads: ${holders.join(', ')}.`;
+  }
+  const parts = [...movers, ...holders];
+  return parts.join(', ') + '.';
 }
 
 // ── HSA User Message Builder ──────────────────────────────────────
