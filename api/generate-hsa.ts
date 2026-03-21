@@ -756,7 +756,23 @@ function postProcessBookNames(
 
   // Section 7: Totals Intel — inject total book details
   if (totalSentence) {
+    const before = result;
     result = injectAfterHeader(result, /7\.\s*Totals Intel/i, totalSentence);
+    if (result === before) {
+      console.log(`[HSA POST-PROCESS] WARNING: Section 7 header not found. Looking for '7.' in output...`);
+      // Try looser match
+      result = injectAfterHeader(result, /7\.\s*Total/i, totalSentence);
+      if (result === before) {
+        // Last resort: append to end before disclaimer
+        const disclaimerIdx = result.indexOf('Disclaimer:');
+        if (disclaimerIdx > 0) {
+          result = result.slice(0, disclaimerIdx) + `\nBook detail for totals: ${totalSentence}\n\n` + result.slice(disclaimerIdx);
+          console.log('[HSA POST-PROCESS] Injected totals before disclaimer as fallback');
+        }
+      }
+    }
+  } else {
+    console.log('[HSA POST-PROCESS] No totalSentence generated — skipping section 7 injection');
   }
 
   // Section 2: Book Behavior — inject spread book details
@@ -812,6 +828,10 @@ function buildBookSentence(
     // Fallback: just list current positions
     if (currentPositions.length > 0) {
       return `Current totals: ${currentPositions.join(', ')}.`;
+    }
+    // Ultimate fallback: use consensus total with book names
+    if (summary.current.consensusTotal > 0 && summary.books.length > 0) {
+      return `Current consensus total ${summary.current.consensusTotal} across ${formatNameList(summary.books)}${summary.opening.consensusTotal > 0 ? ` (opened at ${summary.opening.consensusTotal})` : ''}.`;
     }
     return null;
   }
