@@ -663,7 +663,7 @@ function formatCoordinationBlock(
   coord: MarketCoordination | null,
 ): string {
   if (!coord || coord.movedBooks.length === 0) {
-    return `${label} COORDINATION: No meaningful book coordination detected.\n  All books held their opening lines.`;
+    return `${label} COORDINATION: All books held their opening ${label.toLowerCase()} lines. Mention each book by name and state they held.`;
   }
 
   const lines: string[] = [`${label} COORDINATION:`];
@@ -1059,30 +1059,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Compute which specific books moved, led, followed, or held for
     // each market. This feeds concrete sportsbook names into the prompt
     // so the LLM produces exact attribution instead of generic prose.
+    //
+    // IMPORTANT: cleanSnapshots may have zeroed-out values for markets
+    // flagged unusable (e.g. total=0 on a row where spread was usable).
+    // We build market-specific opening/current maps that skip zero values.
     const coordSorted = [...cleanSnapshots].sort(
       (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
     );
-    const coordOpenByBook: Record<string, OddsSnapshot> = {};
-    const coordCurrByBook: Record<string, OddsSnapshot> = {};
-    for (const s of coordSorted) {
-      if (!coordOpenByBook[s.bookmaker]) coordOpenByBook[s.bookmaker] = s;
-      coordCurrByBook[s.bookmaker] = s;
+
+    function buildMarketMaps(snaps: OddsSnapshot[], getter: (s: OddsSnapshot) => number) {
+      const openMap: Record<string, OddsSnapshot> = {};
+      const currMap: Record<string, OddsSnapshot> = {};
+      for (const s of snaps) {
+        const v = getter(s);
+        if (v === 0) continue; // skip zeroed/missing values
+        if (!openMap[s.bookmaker]) openMap[s.bookmaker] = s;
+        currMap[s.bookmaker] = s;
+      }
+      return { openMap, currMap };
     }
 
-    const totalCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'total');
-    const spreadCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'spread');
-    const mlCoord = computeBookCoordination(coordSorted, coordOpenByBook, coordCurrByBook, 'moneyline');
+    const totalMaps = buildMarketMaps(coordSorted, s => s.total);
+    const spreadMaps = buildMarketMaps(coordSorted, s => s.spread);
+    const mlMaps = buildMarketMaps(coordSorted, s => s.moneyline_home);
 
-    // Debug: log coordination results
-    console.log(`[HSA COORD] Total: ${totalCoord ? `${totalCoord.movedBooks.length}/${totalCoord.totalBooks} moved (${totalCoord.movedBooks.map(b => b.book).join(', ')}) | held: ${totalCoord.heldBooks.map(b => b.book).join(', ') || 'none'} | lead: ${totalCoord.leadBook}` : 'null'}`);
-    console.log(`[HSA COORD] Spread: ${spreadCoord ? `${spreadCoord.movedBooks.length}/${spreadCoord.totalBooks} moved (${spreadCoord.movedBooks.map(b => b.book).join(', ')})` : 'null'}`);
-    console.log(`[HSA COORD] ML: ${mlCoord ? `${mlCoord.movedBooks.length}/${mlCoord.totalBooks} moved` : 'null'}`);
+    const totalCoord = computeBookCoordination(coordSorted, totalMaps.openMap, totalMaps.currMap, 'total');
+    const spreadCoord = computeBookCoordination(coordSorted, spreadMaps.openMap, spreadMaps.currMap, 'spread');
+    const mlCoord = computeBookCoordination(coordSorted, mlMaps.openMap, mlMaps.currMap, 'moneyline');
+
+    // Debug: log coordination results and input data quality
+    console.log(`[HSA COORD] Books in coordSorted: ${[...new Set(coordSorted.map(s => s.bookmaker))].join(', ')}`);
+    console.log(`[HSA COORD] Total maps: open=${Object.keys(totalMaps.openMap).join(',')} curr=${Object.keys(totalMaps.currMap).join(',')}`);
+    console.log(`[HSA COORD] Spread maps: open=${Object.keys(spreadMaps.openMap).join(',')} curr=${Object.keys(spreadMaps.currMap).join(',')}`);
+    console.log(`[HSA COORD] Total result: ${totalCoord ? `${totalCoord.movedBooks.length}/${totalCoord.totalBooks} moved (${totalCoord.movedBooks.map(b => b.book).join(', ')}) | held: ${totalCoord.heldBooks.map(b => b.book).join(', ') || 'none'} | lead: ${totalCoord.leadBook}` : 'null — no books with valid total data passed threshold'}`);
+    console.log(`[HSA COORD] Spread result: ${spreadCoord ? `${spreadCoord.movedBooks.length}/${spreadCoord.totalBooks} moved (${spreadCoord.movedBooks.map(b => b.book).join(', ')})` : 'null'}`);
+    console.log(`[HSA COORD] ML result: ${mlCoord ? `${mlCoord.movedBooks.length}/${mlCoord.totalBooks} moved` : 'null'}`);
+
+    // Build raw per-book lines as a fallback so Claude always has book names
+    const rawBookLines: string[] = ['BOOKS TRACKED: ' + summary.books.join(', ')];
+    rawBookLines.push('PER-BOOK CURRENT LINES (use these book names in your output):');
+    for (const b of summary.current.books) {
+      const openBook = summary.opening.books.find(ob => ob.book === b.book);
+      rawBookLines.push(`  ${b.book}: spread ${openBook?.spread ?? '?'} → ${b.spread} | total ${openBook?.total ?? '?'} → ${b.total} | ML ${openBook?.mlHome ?? '?'} → ${b.mlHome}`);
+    }
 
     const coordBlock = [
       '\n=== BOOK COORDINATION INTEL (USE EXACT BOOK NAMES IN OUTPUT) ===',
-      'IMPORTANT: Use the exact sportsbook names, counts, move paths, and time windows below in your analysis sections.',
-      'Do NOT paraphrase with generic phrases like "books coordinated" or "multiple sportsbooks moved".',
-      'Name every book that moved, name every book that held, and state the exact move path and time window.\n',
+      'IMPORTANT: You MUST use the exact sportsbook names below in sections 1, 2, and 7 of your output.',
+      'Do NOT write "multiple books", "several sportsbooks", or "books coordinated".',
+      'Instead write: "[BookName] and [BookName] moved X → Y, while [BookName] held X."\n',
+      rawBookLines.join('\n'),
+      '',
       formatCoordinationBlock('TOTALS', totalCoord),
       '',
       formatCoordinationBlock('SPREAD', spreadCoord),
