@@ -69,7 +69,7 @@ Heard Sports Analysis
 HSI SIGNAL SUMMARY
 Reverse Line Movement: [Yes/No - if Yes, state which side the line moved TOWARD despite public on the other side, e.g. "Yes - line moved toward Warriors +7 despite 62% public on Celtics"]
 Steam Move: [Yes/No - if Yes, state the direction and magnitude, e.g. "Yes - 1.5-point move toward Under 218 in 20 minutes"]
-Book Alignment: [Describe book consensus or disagreement with specific direction, e.g. "All three books moved toward Hawks +3.5" or "DraftKings shading 1 point lower than FanDuel"]
+Book Alignment: [Name every book. State which moved, which held, and the lead book. e.g. "DraftKings led move to Hawks +3.5, ESPNBet and BetMGM followed within 20 min, FanDuel held +4" or "All 4 books (DraftKings, FanDuel, BetMGM, ESPNBet) aligned at Hawks +3.5"]
 Public Bias: [REQUIRED FORMAT - Two parts separated by a pipe. Part 1: State public side with ticket %. Part 2: State the SHARP SIDE explicitly. Examples:
 "Public: 68% tickets on Celtics | Sharp side: Warriors +7.5 (reverse line movement + money divergence)"
 "Public: 55% tickets on Hawks | Sharp side: No divergence detected - public and sharp aligned on Hawks"
@@ -80,10 +80,10 @@ Market Lean: [Specific team + number or Over/Under + number, e.g. "Warriors +7.5
 Confidence: [Low / Moderate / High]
 
 1. Line Movement
-Describe the opening spread vs current spread, disagreement between sportsbooks, and how the line has moved across the market. Explain if the movement crossed key numbers or represents meaningful price discovery.
+Start by copying the MANDATORY SENTENCE from the SPREAD COORDINATION section verbatim. Then describe disagreement between books, whether the movement crossed key numbers, and price discovery context. Do not replace the mandatory sentence with generic language.
 
 2. Book Behavior
-Describe how sportsbooks reacted to market activity. Explain whether books appear to be respecting action, protecting positions, or aligning with market consensus.
+Start by copying the MANDATORY SENTENCE from the SPREAD COORDINATION section verbatim if not already used in section 1. Then add the MANDATORY SENTENCE from the MONEYLINE COORDINATION section if available. Describe the time window and whether books appear to be respecting action or protecting positions. Do NOT use generic phrases like "books coordinated" — the mandatory sentences already name every book.
 
 3. Public Positioning
 Interpret ticket percentage vs money percentage. Identify any divergence between recreational betting patterns and larger wagers.
@@ -98,7 +98,7 @@ State clearly which side the market pressure is pointing toward, including the s
 List factors that would strengthen or weaken the current market interpretation. Examples: line moving further in current direction, line reversing direction, public percentages shifting significantly, additional steam moves.
 
 7. Totals Intel
-Analyze totals market behavior separately. State the specific total number and whether sportsbook behavior leans Over or Under, with confidence level (Low / Moderate / High). If totals movement shows stronger signals than the spread, clearly state that. If no totals signal exists, say PASS.
+Start this section by copying the MANDATORY SENTENCE from the TOTALS COORDINATION section verbatim. Then add your analysis around it. You MUST include the pre-rendered sentence exactly as provided — do not paraphrase it, do not replace book names with "multiple books" or "several sportsbooks". After the mandatory sentence, add whether the totals signal is stronger than the spread signal, and state confidence level (Low / Moderate / High). If no totals signal exists, say PASS.
 
 End with: Disclaimer: For research purposes only.
 
@@ -109,7 +109,13 @@ Never describe an analysis as a betting opportunity.
 Never use gambling tout language.
 Describe what the market is doing, not what someone should do.
 The Public Bias field MUST always contain "Sharp side:" with an explicit conclusion. Vague descriptions of public percentages without a sharp-side verdict are not acceptable.
-The Market Lean field MUST always name a specific team + number, Over/Under + number, or PASS. Never leave it directionally ambiguous.`;
+The Market Lean field MUST always name a specific team + number, Over/Under + number, or PASS. Never leave it directionally ambiguous.
+
+CRITICAL SPORTSBOOK ATTRIBUTION RULE
+Every section that discusses line movement MUST name exact sportsbooks.
+Never write generic phrases like "books moved", "multiple sportsbooks", "sportsbooks coordinated", or "market shifted".
+Always write: "[BookName], [BookName], and [BookName] moved X → Y within Z minutes, while [BookName] held X."
+Use the BOOK COORDINATION INTEL section provided in the input data as your source of truth for which books moved, held, led, and followed.`;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -503,6 +509,385 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   };
 }
 
+// ── Per-Book Coordination Intel ───────────────────────────────────
+
+interface BookMoveDetail {
+  book: string;
+  openLine: number;
+  currentLine: number;
+  move: number;
+  /** Timestamp of first snapshot for this book */
+  firstAt: string;
+  /** Timestamp of last snapshot for this book */
+  lastAt: string;
+  /** Timestamp of first snapshot where line actually changed from opening */
+  firstMoveAt: string;
+}
+
+interface MarketCoordination {
+  /** Books that moved in the consensus direction */
+  movedBooks: BookMoveDetail[];
+  /** Books that did not move (or moved against consensus) */
+  heldBooks: BookMoveDetail[];
+  /** Lead book — the one whose last snapshot is earliest among movers */
+  leadBook: string | null;
+  /** Follow books — movers other than the lead */
+  followBooks: string[];
+  /** Time window in minutes between first and last mover */
+  timeWindowMinutes: number;
+  /** Total books tracked */
+  totalBooks: number;
+  /** Consensus direction description */
+  direction: string;
+  /** Move path string, e.g. "151 → 151.5" */
+  movePath: string;
+}
+
+function computeBookCoordination(
+  sorted: OddsSnapshot[],
+  openingByBook: Record<string, OddsSnapshot>,
+  currentByBook: Record<string, OddsSnapshot>,
+  market: 'total' | 'spread' | 'moneyline',
+): MarketCoordination | null {
+  const books = Object.keys(currentByBook);
+  if (books.length === 0) return null;
+
+  // Helper: extract the market value from a snapshot
+  function val(s: OddsSnapshot): number {
+    if (market === 'total') return s.total;
+    if (market === 'spread') return s.spread;
+    return s.moneyline_home;
+  }
+
+  // Extract per-book open/current values
+  const details: BookMoveDetail[] = [];
+  for (const book of books) {
+    const open = openingByBook[book];
+    const curr = currentByBook[book];
+    if (!open || !curr) continue;
+
+    const openLine = round1(val(open));
+    const currentLine = round1(val(curr));
+
+    // Skip books with zeroed/missing lines (e.g. total zeroed by classification filter)
+    if (market === 'moneyline') {
+      if (openLine === 0 && currentLine === 0) continue;
+    } else {
+      if (openLine === 0 || currentLine === 0) continue;
+    }
+
+    // Find when this book FIRST moved away from its opening line
+    const bookSnaps = sorted.filter(s => s.bookmaker === book);
+    let firstMoveAt = curr.fetched_at; // fallback
+    for (const snap of bookSnaps) {
+      const snapVal = round1(val(snap));
+      if (snapVal !== 0 && snapVal !== openLine) {
+        firstMoveAt = snap.fetched_at;
+        break;
+      }
+    }
+
+    details.push({
+      book,
+      openLine,
+      currentLine,
+      move: round1(currentLine - openLine),
+      firstAt: open.fetched_at,
+      lastAt: curr.fetched_at,
+      firstMoveAt,
+    });
+  }
+
+  if (details.length === 0) return null;
+
+  // Consensus direction
+  const moves = details.map(d => d.move).filter(m => m !== 0);
+  if (moves.length === 0) return null;
+  const consensusSign = Math.sign(moves.reduce((a, b) => a + b, 0));
+  if (consensusSign === 0) return null;
+
+  // Use a low threshold so we capture books that moved even slightly
+  const threshold = market === 'moneyline' ? 3 : 0.1;
+
+  const movedBooks = details.filter(d => Math.sign(d.move) === consensusSign && Math.abs(d.move) >= threshold);
+  const heldBooks = details.filter(d => !movedBooks.includes(d));
+
+  if (movedBooks.length === 0) return null;
+
+  // Lead book = mover whose line changed earliest (firstMoveAt)
+  const sortedMovers = [...movedBooks].sort(
+    (a, b) => new Date(a.firstMoveAt).getTime() - new Date(b.firstMoveAt).getTime()
+  );
+  const leadBook = sortedMovers[0]?.book ?? null;
+  const followBooks = sortedMovers.slice(1).map(b => b.book);
+
+  // Time window between first book to move and last book to move
+  const moveTimestamps = movedBooks.map(b => new Date(b.firstMoveAt).getTime());
+  const windowMin = Math.round((Math.max(...moveTimestamps) - Math.min(...moveTimestamps)) / 60000);
+
+  // Direction label
+  let direction: string;
+  if (market === 'total') {
+    direction = consensusSign > 0 ? 'Over' : 'Under';
+  } else if (market === 'spread') {
+    direction = consensusSign < 0 ? 'toward home favorite' : 'toward away underdog';
+  } else {
+    direction = consensusSign > 0 ? 'toward home' : 'toward away';
+  }
+
+  // Move path (average opening → average current among movers)
+  const avgOpen = round1(avg(movedBooks.map(b => b.openLine)));
+  const avgCurr = round1(avg(movedBooks.map(b => b.currentLine)));
+  const movePath = `${avgOpen} → ${avgCurr}`;
+
+  return {
+    movedBooks, heldBooks, leadBook, followBooks,
+    timeWindowMinutes: windowMin,
+    totalBooks: details.length,
+    direction, movePath,
+  };
+}
+
+function formatCoordinationBlock(
+  label: string,
+  coord: MarketCoordination | null,
+): string {
+  if (!coord || (coord.movedBooks.length === 0 && coord.heldBooks.length === 0)) {
+    return `${label} COORDINATION: No coordination data available. Use per-book lines from PER-BOOK OPENING → CURRENT LINES section above.`;
+  }
+  if (coord.movedBooks.length === 0 && coord.heldBooks.length > 0) {
+    const heldDetails = coord.heldBooks.map(b => `${b.book} at ${b.currentLine}`).join(', ');
+    const heldNames = formatNameList(coord.heldBooks.map(b => b.book));
+    const lines: string[] = [`${label} COORDINATION:`];
+    lines.push(`  All ${coord.totalBooks} books held their opening ${label.toLowerCase()} lines.`);
+    lines.push(`  Per-book detail: ${heldDetails}`);
+    lines.push('');
+    lines.push(`  >>> MANDATORY SENTENCE FOR ${label} (copy this verbatim into your ${label === 'TOTALS' ? 'section 7 Totals Intel' : 'section 2 Book Behavior'} output): <<<`);
+    lines.push(`  "All tracked books held their ${label.toLowerCase()}: ${heldDetails}."`);
+    return lines.join('\n');
+  }
+
+  const lines: string[] = [`${label} COORDINATION:`];
+  const movedNames = coord.movedBooks.map(b => b.book).join(', ');
+  const ratio = `${coord.movedBooks.length}/${coord.totalBooks}`;
+  lines.push(`  Books moved (${ratio}): ${movedNames}`);
+  lines.push(`  Move path: ${coord.movePath} (${coord.direction})`);
+  lines.push(`  Time window: ${coord.timeWindowMinutes} minutes`);
+
+  if (coord.leadBook) {
+    lines.push(`  Lead book (moved first): ${coord.leadBook}`);
+  }
+  if (coord.followBooks.length > 0) {
+    lines.push(`  Followed by: ${coord.followBooks.join(', ')}`);
+  }
+
+  if (coord.heldBooks.length > 0) {
+    const heldNames = coord.heldBooks.map(b => `${b.book} (still at ${b.currentLine})`).join(', ');
+    lines.push(`  Books that DID NOT move: ${heldNames}`);
+  } else {
+    lines.push(`  ALL ${coord.totalBooks} books moved — no holdouts`);
+  }
+
+  // Per-book detail
+  lines.push('  Per-book move detail:');
+  for (const b of coord.movedBooks) {
+    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${b.move > 0 ? '+' : ''}${b.move}) [MOVED]`);
+  }
+  for (const b of coord.heldBooks) {
+    const moveLabel = b.move === 0 ? 'unchanged' : `${b.move > 0 ? '+' : ''}${b.move}, against consensus`;
+    lines.push(`    ${b.book}: ${b.openLine} → ${b.currentLine} (${moveLabel}) [HELD]`);
+  }
+
+  // Pre-rendered sentence the LLM MUST include verbatim
+  lines.push('');
+  lines.push(`  >>> MANDATORY SENTENCE FOR ${label} (copy this verbatim into your ${label === 'TOTALS' ? 'section 7 Totals Intel' : label === 'SPREAD' ? 'section 2 Book Behavior' : 'section 2 Book Behavior'} output): <<<`);
+  lines.push(`  "${renderPrewrittenSentence(coord)}"`);
+
+  return lines.join('\n');
+}
+
+/** Pre-render a complete sentence the LLM must paste verbatim. */
+function renderPrewrittenSentence(coord: MarketCoordination): string {
+  const movedNames = formatNameList(coord.movedBooks.map(b => b.book));
+  const ratio = `${coord.movedBooks.length}/${coord.totalBooks}`;
+  const windowStr = coord.timeWindowMinutes < 1 ? 'within the same polling window' : `within ${coord.timeWindowMinutes} minutes`;
+
+  let sentence = `${movedNames} moved the ${coord.direction.toLowerCase().includes('over') || coord.direction.toLowerCase().includes('under') ? 'total' : 'line'} ${coord.movePath} (${ratio}-book move ${windowStr})`;
+
+  if (coord.heldBooks.length > 0) {
+    const heldNames = formatNameList(coord.heldBooks.map(b => b.book));
+    const heldLines = coord.heldBooks.map(b => `${b.currentLine}`);
+    sentence += `, while ${heldNames} held at ${heldLines.join('/')}`;
+  }
+  sentence += '.';
+
+  if (coord.leadBook && coord.followBooks.length > 0) {
+    sentence += ` ${coord.leadBook} led the move; ${formatNameList(coord.followBooks)} followed.`;
+  }
+
+  return sentence;
+}
+
+/** Format ["A", "B", "C"] as "A, B, and C" */
+function formatNameList(names: string[]): string {
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
+
+/**
+ * Post-process LLM output to inject pre-rendered book attribution sentences.
+ * The LLM consistently refuses to name sportsbooks, so we inject the detail
+ * directly after each section header regardless of what the LLM wrote.
+ */
+function postProcessBookNames(
+  text: string,
+  totalCoord: MarketCoordination | null,
+  spreadCoord: MarketCoordination | null,
+  summary: OddsSummary,
+): string {
+  let result = text;
+
+  // Build book detail sentences
+  const totalSentence = buildBookSentence(totalCoord, summary, 'total');
+  const spreadSentence = buildBookSentence(spreadCoord, summary, 'spread');
+  console.log(`[HSA POST-PROCESS] totalSentence: ${totalSentence ?? 'NULL'}`);
+  console.log(`[HSA POST-PROCESS] spreadSentence: ${spreadSentence ?? 'NULL'}`);
+  console.log(`[HSA POST-PROCESS] summary.current.books count: ${summary.current.books.length}, totals: ${summary.current.books.map(b => `${b.book}=${b.total}`).join(', ')}`);
+  console.log(`[HSA POST-PROCESS] summary.opening.books count: ${summary.opening.books.length}, totals: ${summary.opening.books.map(b => `${b.book}=${b.total}`).join(', ')}`);
+  // Log a snippet around "7." in the raw output to debug header matching
+  const idx7 = result.indexOf('7.');
+  if (idx7 >= 0) {
+    console.log(`[HSA POST-PROCESS] Raw text near "7.": "${result.substring(idx7, idx7 + 60).replace(/\n/g, '\\n')}"`);
+  } else {
+    console.log('[HSA POST-PROCESS] WARNING: No "7." found in LLM output at all');
+  }
+
+  // Helper: inject sentence right after a section header
+  // Handles both "7. Totals Intel\nText..." and "7. Totals Intel Text..." formats
+  function injectAfterHeader(text: string, headerPattern: RegExp, sentence: string): string {
+    return text.replace(headerPattern, (match) => {
+      return `${match}\nBook detail: ${sentence}`;
+    });
+  }
+
+  // Section 7: Totals Intel — inject total book details
+  if (totalSentence) {
+    const before = result;
+    result = injectAfterHeader(result, /\*{0,2}7\.\s*Totals?\s*Intel\*{0,2}/i, totalSentence);
+    if (result === before) {
+      console.log(`[HSA POST-PROCESS] WARNING: Section 7 header not found. Looking for '7.' in output...`);
+      // Try looser match — handles bold markdown and varied titles
+      result = injectAfterHeader(result, /\*{0,2}7\.\s*Total[^\n]*/i, totalSentence);
+      if (result === before) {
+        // Last resort: append to end before disclaimer
+        const disclaimerIdx = result.indexOf('Disclaimer:');
+        if (disclaimerIdx > 0) {
+          result = result.slice(0, disclaimerIdx) + `\nBook detail for totals: ${totalSentence}\n\n` + result.slice(disclaimerIdx);
+          console.log('[HSA POST-PROCESS] Injected totals before disclaimer as fallback');
+        }
+      }
+    }
+  } else {
+    console.log('[HSA POST-PROCESS] No totalSentence generated — skipping section 7 injection');
+  }
+
+  // Section 2: Book Behavior — inject spread book details
+  if (spreadSentence) {
+    result = injectAfterHeader(result, /\*{0,2}2\.\s*Book Behavior\*{0,2}/i, spreadSentence);
+  }
+
+  // Section 1: Line Movement — inject spread book details
+  if (spreadSentence) {
+    result = injectAfterHeader(result, /\*{0,2}1\.\s*Line Movement\*{0,2}/i, spreadSentence);
+  }
+
+  return result;
+}
+
+/** Build a book attribution sentence from coordination data or raw summary fallback. */
+function buildBookSentence(
+  coord: MarketCoordination | null,
+  summary: OddsSummary,
+  market: 'total' | 'spread',
+): string | null {
+  // If coordination computed successfully with movers, use renderPrewrittenSentence
+  if (coord && coord.movedBooks.length > 0) {
+    return renderPrewrittenSentence(coord);
+  }
+  // If coordination exists but all books held, generate a held sentence
+  if (coord && coord.heldBooks.length > 0) {
+    const heldDetails = coord.heldBooks.map(b => `${b.book} at ${b.currentLine}`).join(', ');
+    return `All tracked books held their ${market === 'total' ? 'totals' : 'spreads'}: ${heldDetails}.`;
+  }
+
+  // Fallback: build from raw summary data
+  const books = summary.current.books;
+  if (books.length === 0) return null;
+
+  if (market === 'total') {
+    console.log(`[HSA buildBookSentence] total market — ${books.length} books, totals: ${books.map(b => `${b.book}=${b.total}`).join(', ')}`);
+    console.log(`[HSA buildBookSentence] consensusTotal: current=${summary.current.consensusTotal}, opening=${summary.opening.consensusTotal}, bookNames=${summary.books.join(',')}`);
+    const movers: string[] = [];
+    const holders: string[] = [];
+    const currentPositions: string[] = [];
+    for (const b of books) {
+      if (b.total <= 0) continue;
+      currentPositions.push(`${b.book} at ${b.total}`);
+      const ob = summary.opening.books.find(o => o.book === b.book);
+      if (!ob || ob.total <= 0) continue;
+      if (ob.total !== b.total) {
+        movers.push(`${b.book}: ${ob.total} → ${b.total}`);
+      } else {
+        holders.push(`${b.book} held at ${b.total}`);
+      }
+    }
+    // If we have movement data, use it
+    if (movers.length > 0 || holders.length > 0) {
+      if (movers.length === 0) {
+        return `All books held their totals: ${holders.join(', ')}.`;
+      }
+      return [...movers, ...holders].join(', ') + '.';
+    }
+    // Fallback: just list current positions
+    if (currentPositions.length > 0) {
+      return `Current totals: ${currentPositions.join(', ')}.`;
+    }
+    // Ultimate fallback: use consensus total with book names
+    if (summary.current.consensusTotal > 0 && summary.books.length > 0) {
+      return `Current consensus total ${summary.current.consensusTotal} across ${formatNameList(summary.books)}${summary.opening.consensusTotal > 0 ? ` (opened at ${summary.opening.consensusTotal})` : ''}.`;
+    }
+    return null;
+  }
+
+  // spread
+  const movers: string[] = [];
+  const holders: string[] = [];
+  const currentPositions: string[] = [];
+  for (const b of books) {
+    if (b.spread === 0) continue;
+    currentPositions.push(`${b.book} at ${b.spread}`);
+    const ob = summary.opening.books.find(o => o.book === b.book);
+    if (!ob || ob.spread === 0) continue;
+    if (ob.spread !== b.spread) {
+      movers.push(`${b.book}: ${ob.spread} → ${b.spread}`);
+    } else {
+      holders.push(`${b.book} held at ${b.spread}`);
+    }
+  }
+  if (movers.length > 0 || holders.length > 0) {
+    if (movers.length === 0) {
+      return `All books held their spreads: ${holders.join(', ')}.`;
+    }
+    return [...movers, ...holders].join(', ') + '.';
+  }
+  if (currentPositions.length > 0) {
+    return `Current spreads: ${currentPositions.join(', ')}.`;
+  }
+  return null;
+}
+
 // ── HSA User Message Builder ──────────────────────────────────────
 
 function buildHsaUserMessage(
@@ -858,15 +1243,135 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[HSA] Lifecycle analysis failed (non-fatal):', lcErr.message);
     }
 
+    // ── Per-book coordination intel ─────────────────────────────────
+    // Compute which specific books moved, led, followed, or held for
+    // each market. This feeds concrete sportsbook names into the prompt
+    // so the LLM produces exact attribution instead of generic prose.
+    //
+    // IMPORTANT: cleanSnapshots may have zeroed-out values for markets
+    // flagged unusable (e.g. total=0 on a row where spread was usable).
+    // We build market-specific opening/current maps that skip zero values.
+    const coordSorted = [...cleanSnapshots].sort(
+      (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
+    );
+
+    function buildMarketMaps(snaps: OddsSnapshot[], getter: (s: OddsSnapshot) => number) {
+      const openMap: Record<string, OddsSnapshot> = {};
+      const currMap: Record<string, OddsSnapshot> = {};
+      for (const s of snaps) {
+        const v = getter(s);
+        if (v === 0) continue; // skip zeroed/missing values
+        if (!openMap[s.bookmaker]) openMap[s.bookmaker] = s;
+        currMap[s.bookmaker] = s;
+      }
+      return { openMap, currMap };
+    }
+
+    const totalMaps = buildMarketMaps(coordSorted, s => s.total);
+    const spreadMaps = buildMarketMaps(coordSorted, s => s.spread);
+    const mlMaps = buildMarketMaps(coordSorted, s => s.moneyline_home);
+
+    const totalCoord = computeBookCoordination(coordSorted, totalMaps.openMap, totalMaps.currMap, 'total');
+    const spreadCoord = computeBookCoordination(coordSorted, spreadMaps.openMap, spreadMaps.currMap, 'spread');
+    const mlCoord = computeBookCoordination(coordSorted, mlMaps.openMap, mlMaps.currMap, 'moneyline');
+
+    // Debug: log coordination results and input data quality
+    console.log(`[HSA COORD] Books in coordSorted: ${[...new Set(coordSorted.map(s => s.bookmaker))].join(', ')}`);
+    console.log(`[HSA COORD] Total maps: open=${Object.keys(totalMaps.openMap).join(',')} curr=${Object.keys(totalMaps.currMap).join(',')}`);
+    console.log(`[HSA COORD] Spread maps: open=${Object.keys(spreadMaps.openMap).join(',')} curr=${Object.keys(spreadMaps.currMap).join(',')}`);
+    console.log(`[HSA COORD] Total result: ${totalCoord ? `${totalCoord.movedBooks.length}/${totalCoord.totalBooks} moved (${totalCoord.movedBooks.map(b => b.book).join(', ')}) | held: ${totalCoord.heldBooks.map(b => b.book).join(', ') || 'none'} | lead: ${totalCoord.leadBook}` : 'null — no books with valid total data passed threshold'}`);
+    console.log(`[HSA COORD] Spread result: ${spreadCoord ? `${spreadCoord.movedBooks.length}/${spreadCoord.totalBooks} moved (${spreadCoord.movedBooks.map(b => b.book).join(', ')})` : 'null'}`);
+    console.log(`[HSA COORD] ML result: ${mlCoord ? `${mlCoord.movedBooks.length}/${mlCoord.totalBooks} moved` : 'null'}`);
+
+    // Build raw per-book lines as a fallback so Claude always has book names
+    const rawBookLines: string[] = ['BOOKS TRACKED: ' + summary.books.join(', ')];
+    rawBookLines.push('PER-BOOK OPENING → CURRENT LINES:');
+    for (const b of summary.current.books) {
+      const openBook = summary.opening.books.find(ob => ob.book === b.book);
+      const totalOpen = openBook?.total ?? 0;
+      const totalCurr = b.total;
+      const totalMoved = totalOpen > 0 && totalCurr > 0 && totalOpen !== totalCurr;
+      const spreadOpen = openBook?.spread ?? 0;
+      const spreadCurr = b.spread;
+      const spreadMoved = spreadOpen !== 0 && spreadCurr !== 0 && spreadOpen !== spreadCurr;
+      rawBookLines.push(`  ${b.book}: spread ${spreadOpen} → ${spreadCurr}${spreadMoved ? ' [MOVED]' : ' [HELD]'} | total ${totalOpen} → ${totalCurr}${totalMoved ? ' [MOVED]' : ' [HELD]'} | ML ${openBook?.mlHome ?? '?'} → ${b.mlHome}`);
+    }
+
+    // Generate fallback mandatory sentences from raw summary data if coordination returned null
+    if (!totalCoord && summary.current.books.length > 0) {
+      const totalMovers = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.total > 0 && b.total > 0 && ob.total !== b.total;
+      });
+      const totalHolders = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.total > 0 && b.total > 0 && ob.total === b.total;
+      });
+      rawBookLines.push('');
+      rawBookLines.push(`  >>> FALLBACK MANDATORY SENTENCE FOR TOTALS (copy verbatim into section 7): <<<`);
+      if (totalMovers.length > 0) {
+        const moverNames = formatNameList(totalMovers.map(b => b.book));
+        const holderPart = totalHolders.length > 0
+          ? `, while ${formatNameList(totalHolders.map(b => b.book))} held at ${totalHolders[0]?.total}`
+          : '';
+        const sampleOpen = summary.opening.books.find(o => o.book === totalMovers[0].book)?.total ?? '?';
+        rawBookLines.push(`  "${moverNames} moved the total from ${sampleOpen} to ${totalMovers[0].total} (${totalMovers.length}/${summary.current.books.length}-book move)${holderPart}."`);
+      } else if (totalHolders.length > 0) {
+        // All books held — still need to name them
+        const holderDetails = totalHolders.map(b => `${b.book} at ${b.total}`).join(', ');
+        rawBookLines.push(`  "All tracked books held their totals: ${holderDetails}."`);
+      } else {
+        // Books exist but totals are 0 — use book names with consensus
+        const bookNames = formatNameList(summary.books);
+        rawBookLines.push(`  "Current totals consensus at ${summary.current.consensusTotal} across ${bookNames} (opened at ${summary.opening.consensusTotal})."`);
+      }
+    }
+    if (!spreadCoord && summary.current.books.length > 0) {
+      const spreadMovers = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.spread !== 0 && b.spread !== 0 && ob.spread !== b.spread;
+      });
+      const spreadHolders = summary.current.books.filter(b => {
+        const ob = summary.opening.books.find(o => o.book === b.book);
+        return ob && ob.spread !== 0 && b.spread !== 0 && ob.spread === b.spread;
+      });
+      if (spreadMovers.length > 0) {
+        const moverNames = formatNameList(spreadMovers.map(b => b.book));
+        const holderPart = spreadHolders.length > 0
+          ? `, while ${formatNameList(spreadHolders.map(b => b.book))} held at ${spreadHolders[0]?.spread}`
+          : '';
+        const sampleOpen = summary.opening.books.find(o => o.book === spreadMovers[0].book)?.spread ?? '?';
+        rawBookLines.push('');
+        rawBookLines.push(`  >>> FALLBACK MANDATORY SENTENCE FOR SPREAD (copy verbatim into section 1): <<<`);
+        rawBookLines.push(`  "${moverNames} moved the spread from ${sampleOpen} to ${spreadMovers[0].spread} (${spreadMovers.length}/${summary.current.books.length}-book move)${holderPart}."`);
+      }
+    }
+
+    const coordBlock = [
+      '\n=== BOOK COORDINATION INTEL (USE EXACT BOOK NAMES IN OUTPUT) ===',
+      'IMPORTANT: You MUST use the exact sportsbook names below in sections 1, 2, and 7 of your output.',
+      'Do NOT write "multiple books", "several sportsbooks", or "books coordinated".',
+      'Instead write: "[BookName] and [BookName] moved X → Y, while [BookName] held X."\n',
+      rawBookLines.join('\n'),
+      '',
+      formatCoordinationBlock('TOTALS', totalCoord),
+      '',
+      formatCoordinationBlock('SPREAD', spreadCoord),
+      '',
+      formatCoordinationBlock('MONEYLINE', mlCoord),
+    ].join('\n');
+
+    console.log(`[HSA COORD BLOCK]\n${coordBlock}`);
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context as a structured section
-    const fullMessage = userMessage + '\n\n' + lifecycleBlock;
+    // Append lifecycle context and coordination intel as structured sections
+    const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock;
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      max_tokens: 3000,
       system: HSA_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: fullMessage }],
     });
@@ -878,8 +1383,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Claude returned empty response' });
     }
 
-    // Parse structured text response — extract key fields
-    const narrative = rawText;
+    // Post-process: inject book detail sentences after section headers
+    let narrative: string;
+    try {
+      narrative = postProcessBookNames(rawText, totalCoord, spreadCoord, summary);
+      if (narrative !== rawText) {
+        console.log('[HSA POST-PROCESS] Injected book detail sentences');
+        // Log a diff snippet to see what was added
+        const diffChars = narrative.length - rawText.length;
+        console.log(`[HSA POST-PROCESS] Added ${diffChars} chars. Contains "Book detail": ${narrative.includes('Book detail')}`);
+      } else {
+        console.log('[HSA POST-PROCESS] WARNING: No book details injected — section headers may not match expected patterns');
+        console.log('[HSA POST-PROCESS] Raw text section headers:', rawText.match(/\d+\.\s*\w[\w\s]*/g)?.slice(0, 10));
+      }
+    } catch (e: any) {
+      console.error('[HSA POST-PROCESS] ERROR in postProcessBookNames:', e.message);
+      narrative = rawText; // fallback to raw text on error
+    }
 
     // Extract status tag from output
     const statusMatch = narrative.match(/\b(PASS|WATCH|ACTIVE)\b/);

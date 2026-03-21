@@ -47,6 +47,13 @@ interface PerMarketRead {
   summary: string;
 }
 
+interface TotalMarketRead extends PerMarketRead {
+  total_books_moved: number;
+  total_books_list: string | null;
+  total_move_time_window: number | null;
+  total_velocity: number | null;
+}
+
 interface HsaGameObject {
   // Identity
   canonical_game_id: string;
@@ -101,7 +108,7 @@ interface HsaGameObject {
 
   // Per-market reads (suppressed when insufficient_data = true)
   side_read: PerMarketRead;
-  total_read: PerMarketRead;
+  total_read: TotalMarketRead;
   ml_read: PerMarketRead;
 
   // Data-quality fields
@@ -363,7 +370,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         primary_market: null, primary_signal: null, confidence_score: null,
       };
       let sideRead: PerMarketRead = { ...PASS_READ };
-      let totalRead: PerMarketRead = { ...PASS_READ };
+      let totalRead: TotalMarketRead = { ...PASS_READ, total_books_moved: 0, total_books_list: null, total_move_time_window: null, total_velocity: null };
       let mlRead: PerMarketRead = { ...PASS_READ };
       let hasAlerts = false;
 
@@ -408,6 +415,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 confidence: a.total_confidence ?? 'PASS',
                 signal_type: a.total_signal_type ?? 'NO_EDGE',
                 summary: a.total_summary ?? '',
+                total_books_moved: a.total_books_moved ?? 0,
+                total_books_list: a.total_books_list ?? null,
+                total_move_time_window: a.total_move_time_window ?? null,
+                total_velocity: a.total_velocity ?? null,
               };
             }
             if (a.ml_confidence) {
