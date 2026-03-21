@@ -142,8 +142,32 @@ function americanToImpliedProb(odds: number): number {
   return 100 / (odds + 100);
 }
 
-function avg(nums: number[]): number {
-  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+/**
+ * Compute consensus via MODE (most common value) — always a real book line.
+ * NEVER returns averaged/synthetic numbers.
+ */
+function mode(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  if (nums.length === 1) return nums[0];
+
+  const freq = new Map<number, number>();
+  for (const n of nums) freq.set(n, (freq.get(n) || 0) + 1);
+
+  let maxFreq = 0;
+  for (const count of freq.values()) {
+    if (count > maxFreq) maxFreq = count;
+  }
+
+  const candidates = [...freq.entries()]
+    .filter(([, count]) => count === maxFreq)
+    .map(([val]) => val);
+
+  if (candidates.length === 1) return candidates[0];
+
+  const sorted = [...nums].sort((a, b) => a - b);
+  const medianVal = sorted[Math.floor(sorted.length / 2)];
+  candidates.sort((a, b) => Math.abs(a - medianVal) - Math.abs(b - medianVal));
+  return candidates[0];
 }
 
 function round1(n: number): number {
@@ -286,17 +310,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const openMLs = Object.values(openingByBook).map(s => s.moneyline_home).filter((v: any) => v != null);
       const currMLs = Object.values(currentByBook).map(s => s.moneyline_home).filter((v: any) => v != null);
 
-      const openingSpread = openSpreads.length ? round1(avg(openSpreads)) : null;
-      const currentSpread = currSpreads.length ? round1(avg(currSpreads)) : null;
-      const openingTotal = openTotals.length ? round1(avg(openTotals)) : null;
-      const currentTotal = currTotals.length ? round1(avg(currTotals)) : null;
-      const openingMLHome = openMLs.length ? Math.round(avg(openMLs)) : null;
-      const currentMLHome = currMLs.length ? Math.round(avg(currMLs)) : null;
+      // Consensus via MODE — real book lines only, never averaged
+      const openingSpread = openSpreads.length ? mode(openSpreads) : null;
+      const currentSpread = currSpreads.length ? mode(currSpreads) : null;
+      const openingTotal = openTotals.length ? mode(openTotals) : null;
+      const currentTotal = currTotals.length ? mode(currTotals) : null;
+      const openingMLHome = openMLs.length ? mode(openMLs) : null;
+      const currentMLHome = currMLs.length ? mode(currMLs) : null;
 
       const spreadMove = openingSpread != null && currentSpread != null
-        ? round1(currentSpread - openingSpread) : null;
+        ? currentSpread - openingSpread : null;
       const totalMove = openingTotal != null && currentTotal != null
-        ? round1(currentTotal - openingTotal) : null;
+        ? currentTotal - openingTotal : null;
 
       let mlProbDelta: number | null = null;
       if (openingMLHome != null && currentMLHome != null) {

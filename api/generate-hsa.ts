@@ -318,16 +318,36 @@ interface OddsSummary {
 
 // ── Odds Summarizer ────────────────────────────────────────────────
 
-function avg(nums: number[]): number {
-  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+/**
+ * Compute consensus via MODE (most common value) — always a real book line.
+ * NEVER returns averaged/synthetic numbers.
+ */
+function mode(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  if (nums.length === 1) return nums[0];
+
+  const freq = new Map<number, number>();
+  for (const n of nums) freq.set(n, (freq.get(n) || 0) + 1);
+
+  let maxFreq = 0;
+  for (const count of freq.values()) {
+    if (count > maxFreq) maxFreq = count;
+  }
+
+  const candidates = [...freq.entries()]
+    .filter(([, count]) => count === maxFreq)
+    .map(([val]) => val);
+
+  if (candidates.length === 1) return candidates[0];
+
+  const sorted = [...nums].sort((a, b) => a - b);
+  const medianVal = sorted[Math.floor(sorted.length / 2)];
+  candidates.sort((a, b) => Math.abs(a - medianVal) - Math.abs(b - medianVal));
+  return candidates[0];
 }
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
-}
-
-function roundHalf(n: number): number {
-  return Math.round(n * 2) / 2;
 }
 
 function toBookLine(snap: OddsSnapshot): BookLine {
@@ -384,8 +404,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   const openingBooks = Object.values(openingByBook).map(toBookLine);
   const openingSpreads = openingBooks.filter((b) => b.spread !== 0);
   const openingTotals = openingBooks.filter((b) => b.total !== 0);
-  const openingConsensusSpread = roundHalf(avg(openingSpreads.map((b) => b.spread)));
-  const openingConsensusTotal = roundHalf(avg(openingTotals.map((b) => b.total)));
+  const openingConsensusSpread = mode(openingSpreads.map((b) => b.spread));
+  const openingConsensusTotal = mode(openingTotals.map((b) => b.total));
 
   const currentByBook: Record<string, OddsSnapshot> = {};
   for (const s of sorted) {
@@ -394,11 +414,11 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   const currentBooks = Object.values(currentByBook).map(toBookLine);
   const currentSpreadsValid = currentBooks.filter((b) => b.spread !== 0);
   const currentTotalsValid = currentBooks.filter((b) => b.total !== 0);
-  const currentConsensusSpread = roundHalf(avg(currentSpreadsValid.map((b) => b.spread)));
-  const currentConsensusTotal = roundHalf(avg(currentTotalsValid.map((b) => b.total)));
+  const currentConsensusSpread = mode(currentSpreadsValid.map((b) => b.spread));
+  const currentConsensusTotal = mode(currentTotalsValid.map((b) => b.total));
 
-  const spreadMovement = round1(currentConsensusSpread - openingConsensusSpread);
-  const totalMovement = round1(currentConsensusTotal - openingConsensusTotal);
+  const spreadMovement = currentConsensusSpread - openingConsensusSpread;
+  const totalMovement = currentConsensusTotal - openingConsensusTotal;
 
   const spreadDirection =
     Math.abs(spreadMovement) < 0.5 ? 'stable'
@@ -438,8 +458,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
     const validTotals = bl.filter((b) => b.total !== 0);
     return {
       minutesBefore: minsBefore, label, books: bl,
-      consensusSpread: roundHalf(avg(validSpreads.map((b) => b.spread))),
-      consensusTotal: roundHalf(avg(validTotals.map((b) => b.total))),
+      consensusSpread: mode(validSpreads.map((b) => b.spread)),
+      consensusTotal: mode(validTotals.map((b) => b.total)),
     };
   });
   timeline.sort((a, b) => b.minutesBefore - a.minutesBefore);
@@ -487,8 +507,8 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   const totalVelocityPerHour = trackingHours > 0 ? round1(Math.abs(totalMovement) / trackingHours) : 0;
 
   const timelineTotals = timeline.map((t) => t.consensusTotal).filter((t) => t > 0);
-  const highestTotalSeen = timelineTotals.length ? round1(Math.max(...timelineTotals)) : openingConsensusTotal;
-  const lowestTotalSeen = timelineTotals.length ? round1(Math.min(...timelineTotals)) : openingConsensusTotal;
+  const highestTotalSeen = timelineTotals.length ? Math.max(...timelineTotals) : openingConsensusTotal;
+  const lowestTotalSeen = timelineTotals.length ? Math.min(...timelineTotals) : openingConsensusTotal;
 
   const currentTotalsArr = currentBooks.map((b) => b.total).filter((t) => t > 0);
   const totalBookDisagreement = currentTotalsArr.length > 1 ? round1(Math.max(...currentTotalsArr) - Math.min(...currentTotalsArr)) : 0;
@@ -566,8 +586,8 @@ function computeBookCoordination(
     const curr = currentByBook[book];
     if (!open || !curr) continue;
 
-    const openLine = round1(val(open));
-    const currentLine = round1(val(curr));
+    const openLine = val(open);
+    const currentLine = val(curr);
 
     // Skip books with zeroed/missing lines (e.g. total zeroed by classification filter)
     if (market === 'moneyline') {
@@ -580,7 +600,7 @@ function computeBookCoordination(
     const bookSnaps = sorted.filter(s => s.bookmaker === book);
     let firstMoveAt = curr.fetched_at; // fallback
     for (const snap of bookSnaps) {
-      const snapVal = round1(val(snap));
+      const snapVal = val(snap);
       if (snapVal !== 0 && snapVal !== openLine) {
         firstMoveAt = snap.fetched_at;
         break;
@@ -591,7 +611,7 @@ function computeBookCoordination(
       book,
       openLine,
       currentLine,
-      move: round1(currentLine - openLine),
+      move: currentLine - openLine,
       firstAt: open.fetched_at,
       lastAt: curr.fetched_at,
       firstMoveAt,
@@ -635,10 +655,10 @@ function computeBookCoordination(
     direction = consensusSign > 0 ? 'toward home' : 'toward away';
   }
 
-  // Move path (average opening → average current among movers)
-  const avgOpen = round1(avg(movedBooks.map(b => b.openLine)));
-  const avgCurr = round1(avg(movedBooks.map(b => b.currentLine)));
-  const movePath = `${avgOpen} → ${avgCurr}`;
+  // Move path: use MODE of mover lines (real book lines, never averaged)
+  const modeOpen = mode(movedBooks.map(b => b.openLine));
+  const modeCurr = mode(movedBooks.map(b => b.currentLine));
+  const movePath = `${modeOpen} → ${modeCurr}`;
 
   return {
     movedBooks, heldBooks, leadBook, followBooks,
@@ -1416,7 +1436,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Compute totals data
     const totalsOpen = summary.opening.consensusTotal;
     const totalsCurrent = summary.current.consensusTotal;
-    const totalsMove = roundHalf(totalsCurrent - totalsOpen);
+    const totalsMove = totalsCurrent - totalsOpen;
 
     // Store in claude_analyses
     const { error: insertError } = await supabase.from('claude_analyses').insert({
