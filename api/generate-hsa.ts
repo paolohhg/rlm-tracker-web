@@ -631,9 +631,9 @@ function computeBookCoordination(
   const leadBook = sortedMovers[0]?.book ?? null;
   const followBooks = sortedMovers.slice(1).map(b => b.book);
 
-  // Time window
-  const timestamps = movedBooks.map(b => new Date(b.lastAt).getTime());
-  const windowMin = Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 60000);
+  // Time window between first book to move and last book to move
+  const moveTimestamps = movedBooks.map(b => new Date(b.firstMoveAt).getTime());
+  const windowMin = Math.round((Math.max(...moveTimestamps) - Math.min(...moveTimestamps)) / 60000);
 
   // Direction label
   let direction: string;
@@ -1100,7 +1100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      max_tokens: 3000,
       system: HSA_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: fullMessage }],
     });
