@@ -745,6 +745,13 @@ function postProcessBookNames(
   console.log(`[HSA POST-PROCESS] spreadSentence: ${spreadSentence ?? 'NULL'}`);
   console.log(`[HSA POST-PROCESS] summary.current.books count: ${summary.current.books.length}, totals: ${summary.current.books.map(b => `${b.book}=${b.total}`).join(', ')}`);
   console.log(`[HSA POST-PROCESS] summary.opening.books count: ${summary.opening.books.length}, totals: ${summary.opening.books.map(b => `${b.book}=${b.total}`).join(', ')}`);
+  // Log a snippet around "7." in the raw output to debug header matching
+  const idx7 = result.indexOf('7.');
+  if (idx7 >= 0) {
+    console.log(`[HSA POST-PROCESS] Raw text near "7.": "${result.substring(idx7, idx7 + 60).replace(/\n/g, '\\n')}"`);
+  } else {
+    console.log('[HSA POST-PROCESS] WARNING: No "7." found in LLM output at all');
+  }
 
   // Helper: inject sentence right after a section header
   // Handles both "7. Totals Intel\nText..." and "7. Totals Intel Text..." formats
@@ -757,11 +764,11 @@ function postProcessBookNames(
   // Section 7: Totals Intel — inject total book details
   if (totalSentence) {
     const before = result;
-    result = injectAfterHeader(result, /7\.\s*Totals Intel/i, totalSentence);
+    result = injectAfterHeader(result, /\*{0,2}7\.\s*Totals?\s*Intel\*{0,2}/i, totalSentence);
     if (result === before) {
       console.log(`[HSA POST-PROCESS] WARNING: Section 7 header not found. Looking for '7.' in output...`);
-      // Try looser match
-      result = injectAfterHeader(result, /7\.\s*Total/i, totalSentence);
+      // Try looser match — handles bold markdown and varied titles
+      result = injectAfterHeader(result, /\*{0,2}7\.\s*Total[^\n]*/i, totalSentence);
       if (result === before) {
         // Last resort: append to end before disclaimer
         const disclaimerIdx = result.indexOf('Disclaimer:');
@@ -777,12 +784,12 @@ function postProcessBookNames(
 
   // Section 2: Book Behavior — inject spread book details
   if (spreadSentence) {
-    result = injectAfterHeader(result, /2\.\s*Book Behavior/i, spreadSentence);
+    result = injectAfterHeader(result, /\*{0,2}2\.\s*Book Behavior\*{0,2}/i, spreadSentence);
   }
 
   // Section 1: Line Movement — inject spread book details
   if (spreadSentence) {
-    result = injectAfterHeader(result, /1\.\s*Line Movement/i, spreadSentence);
+    result = injectAfterHeader(result, /\*{0,2}1\.\s*Line Movement\*{0,2}/i, spreadSentence);
   }
 
   return result;
@@ -804,6 +811,8 @@ function buildBookSentence(
   if (books.length === 0) return null;
 
   if (market === 'total') {
+    console.log(`[HSA buildBookSentence] total market — ${books.length} books, totals: ${books.map(b => `${b.book}=${b.total}`).join(', ')}`);
+    console.log(`[HSA buildBookSentence] consensusTotal: current=${summary.current.consensusTotal}, opening=${summary.opening.consensusTotal}, bookNames=${summary.books.join(',')}`);
     const movers: string[] = [];
     const holders: string[] = [];
     const currentPositions: string[] = [];
