@@ -742,29 +742,27 @@ function postProcessBookNames(
   const totalSentence = buildBookSentence(totalCoord, summary, 'total');
   const spreadSentence = buildBookSentence(spreadCoord, summary, 'spread');
 
-  // Inject after section headers using regex
+  // Helper: inject sentence right after a section header
+  // Handles both "7. Totals Intel\nText..." and "7. Totals Intel Text..." formats
+  function injectAfterHeader(text: string, headerPattern: RegExp, sentence: string): string {
+    return text.replace(headerPattern, (match) => {
+      return `${match}\nBook detail: ${sentence}`;
+    });
+  }
+
   // Section 7: Totals Intel — inject total book details
   if (totalSentence) {
-    result = result.replace(
-      /(7\.\s*Totals Intel\n)/i,
-      `$1Book detail: ${totalSentence}\n`,
-    );
+    result = injectAfterHeader(result, /7\.\s*Totals Intel/i, totalSentence);
   }
 
   // Section 2: Book Behavior — inject spread book details
   if (spreadSentence) {
-    result = result.replace(
-      /(2\.\s*Book Behavior\n)/i,
-      `$1Book detail: ${spreadSentence}\n`,
-    );
+    result = injectAfterHeader(result, /2\.\s*Book Behavior/i, spreadSentence);
   }
 
   // Section 1: Line Movement — inject spread book details
   if (spreadSentence) {
-    result = result.replace(
-      /(1\.\s*Line Movement\n)/i,
-      `$1Book detail: ${spreadSentence}\n`,
-    );
+    result = injectAfterHeader(result, /1\.\s*Line Movement/i, spreadSentence);
   }
 
   return result;
@@ -1312,8 +1310,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Claude returned empty response' });
     }
 
-    // Post-process: replace generic book references with actual names
+    // Post-process: inject book detail sentences after section headers
     const narrative = postProcessBookNames(rawText, totalCoord, spreadCoord, summary);
+    if (narrative !== rawText) {
+      console.log('[HSA POST-PROCESS] Injected book detail sentences');
+    } else {
+      console.log('[HSA POST-PROCESS] WARNING: No book details injected — section headers may not match expected patterns');
+      console.log('[HSA POST-PROCESS] Raw text section headers:', rawText.match(/\d+\.\s*\w[\w\s]*/g)?.slice(0, 10));
+    }
 
     // Extract status tag from output
     const statusMatch = narrative.match(/\b(PASS|WATCH|ACTIVE)\b/);
