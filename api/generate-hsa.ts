@@ -652,8 +652,19 @@ function formatCoordinationBlock(
   label: string,
   coord: MarketCoordination | null,
 ): string {
-  if (!coord || coord.movedBooks.length === 0) {
-    return `${label} COORDINATION: All books held their opening ${label.toLowerCase()} lines. Mention each book by name and state they held.`;
+  if (!coord || (coord.movedBooks.length === 0 && coord.heldBooks.length === 0)) {
+    return `${label} COORDINATION: No coordination data available. Use per-book lines from PER-BOOK OPENING → CURRENT LINES section above.`;
+  }
+  if (coord.movedBooks.length === 0 && coord.heldBooks.length > 0) {
+    const heldDetails = coord.heldBooks.map(b => `${b.book} at ${b.currentLine}`).join(', ');
+    const heldNames = formatNameList(coord.heldBooks.map(b => b.book));
+    const lines: string[] = [`${label} COORDINATION:`];
+    lines.push(`  All ${coord.totalBooks} books held their opening ${label.toLowerCase()} lines.`);
+    lines.push(`  Per-book detail: ${heldDetails}`);
+    lines.push('');
+    lines.push(`  >>> MANDATORY SENTENCE FOR ${label} (copy this verbatim into your ${label === 'TOTALS' ? 'section 7 Totals Intel' : 'section 2 Book Behavior'} output): <<<`);
+    lines.push(`  "All tracked books held their ${label.toLowerCase()}: ${heldDetails}."`);
+    return lines.join('\n');
   }
 
   const lines: string[] = [`${label} COORDINATION:`];
@@ -801,9 +812,14 @@ function buildBookSentence(
   summary: OddsSummary,
   market: 'total' | 'spread',
 ): string | null {
-  // If coordination computed successfully, use renderPrewrittenSentence
+  // If coordination computed successfully with movers, use renderPrewrittenSentence
   if (coord && coord.movedBooks.length > 0) {
     return renderPrewrittenSentence(coord);
+  }
+  // If coordination exists but all books held, generate a held sentence
+  if (coord && coord.heldBooks.length > 0) {
+    const heldDetails = coord.heldBooks.map(b => `${b.book} at ${b.currentLine}`).join(', ');
+    return `All tracked books held their ${market === 'total' ? 'totals' : 'spreads'}: ${heldDetails}.`;
   }
 
   // Fallback: build from raw summary data
@@ -1291,15 +1307,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const ob = summary.opening.books.find(o => o.book === b.book);
         return ob && ob.total > 0 && b.total > 0 && ob.total === b.total;
       });
+      rawBookLines.push('');
+      rawBookLines.push(`  >>> FALLBACK MANDATORY SENTENCE FOR TOTALS (copy verbatim into section 7): <<<`);
       if (totalMovers.length > 0) {
         const moverNames = formatNameList(totalMovers.map(b => b.book));
         const holderPart = totalHolders.length > 0
           ? `, while ${formatNameList(totalHolders.map(b => b.book))} held at ${totalHolders[0]?.total}`
           : '';
         const sampleOpen = summary.opening.books.find(o => o.book === totalMovers[0].book)?.total ?? '?';
-        rawBookLines.push('');
-        rawBookLines.push(`  >>> FALLBACK MANDATORY SENTENCE FOR TOTALS (copy verbatim into section 7): <<<`);
         rawBookLines.push(`  "${moverNames} moved the total from ${sampleOpen} to ${totalMovers[0].total} (${totalMovers.length}/${summary.current.books.length}-book move)${holderPart}."`);
+      } else if (totalHolders.length > 0) {
+        // All books held — still need to name them
+        const holderDetails = totalHolders.map(b => `${b.book} at ${b.total}`).join(', ');
+        rawBookLines.push(`  "All tracked books held their totals: ${holderDetails}."`);
+      } else {
+        // Books exist but totals are 0 — use book names with consensus
+        const bookNames = formatNameList(summary.books);
+        rawBookLines.push(`  "Current totals consensus at ${summary.current.consensusTotal} across ${bookNames} (opened at ${summary.opening.consensusTotal})."`);
       }
     }
     if (!spreadCoord && summary.current.books.length > 0) {
@@ -1360,12 +1384,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Post-process: inject book detail sentences after section headers
-    const narrative = postProcessBookNames(rawText, totalCoord, spreadCoord, summary);
-    if (narrative !== rawText) {
-      console.log('[HSA POST-PROCESS] Injected book detail sentences');
-    } else {
-      console.log('[HSA POST-PROCESS] WARNING: No book details injected — section headers may not match expected patterns');
-      console.log('[HSA POST-PROCESS] Raw text section headers:', rawText.match(/\d+\.\s*\w[\w\s]*/g)?.slice(0, 10));
+    let narrative: string;
+    try {
+      narrative = postProcessBookNames(rawText, totalCoord, spreadCoord, summary);
+      if (narrative !== rawText) {
+        console.log('[HSA POST-PROCESS] Injected book detail sentences');
+        // Log a diff snippet to see what was added
+        const diffChars = narrative.length - rawText.length;
+        console.log(`[HSA POST-PROCESS] Added ${diffChars} chars. Contains "Book detail": ${narrative.includes('Book detail')}`);
+      } else {
+        console.log('[HSA POST-PROCESS] WARNING: No book details injected — section headers may not match expected patterns');
+        console.log('[HSA POST-PROCESS] Raw text section headers:', rawText.match(/\d+\.\s*\w[\w\s]*/g)?.slice(0, 10));
+      }
+    } catch (e: any) {
+      console.error('[HSA POST-PROCESS] ERROR in postProcessBookNames:', e.message);
+      narrative = rawText; // fallback to raw text on error
     }
 
     // Extract status tag from output
