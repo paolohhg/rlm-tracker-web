@@ -725,6 +725,92 @@ function formatNameList(names: string[]): string {
   return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
 }
 
+/**
+ * Post-process LLM output to replace generic book references with actual names.
+ * This is the nuclear option: the LLM refuses to name books, so we do it ourselves.
+ */
+function postProcessBookNames(
+  text: string,
+  totalCoord: MarketCoordination | null,
+  spreadCoord: MarketCoordination | null,
+  summary: OddsSummary,
+): string {
+  let result = text;
+
+  // Generic phrases to detect and replace
+  const genericPatterns = [
+    /(?:across |at )(?:multiple|several|most|all|the tracked|the major|many) (?:sports)?books?\b(?:\s+(?:simultaneously|in unison|together|at once))?/gi,
+    /(?:multiple|several|most|all|the tracked|the major|many) (?:sports)?books?\s+(?:moved|aligned|converged|shifted|adjusted|coordinated|showing|show)\b/gi,
+    /books?\s+(?:aligning|aligning at|aligned at|converging at|converged at|settling at)\s+([\d.]+)/gi,
+    /(?:multiple|several|most|all) books?\s+(?:are |now )?(?:at|showing|posted at)\s+([\d.]+)/gi,
+  ];
+
+  // Build replacement text based on coordination data
+  const buildTotalReplacement = (): string | null => {
+    if (totalCoord && totalCoord.movedBooks.length > 0) {
+      return renderPrewrittenSentence(totalCoord);
+    }
+    // Fallback from summary
+    const books = summary.current.books.filter(b => b.total > 0);
+    if (books.length === 0) return null;
+    const names = formatNameList(books.map(b => b.book));
+    const vals = [...new Set(books.map(b => b.total))];
+    if (vals.length === 1) {
+      return `${names} are all at ${vals[0]}`;
+    }
+    return `${books.map(b => `${b.book} at ${b.total}`).join(', ')}`;
+  };
+
+  const buildSpreadReplacement = (): string | null => {
+    if (spreadCoord && spreadCoord.movedBooks.length > 0) {
+      return renderPrewrittenSentence(spreadCoord);
+    }
+    const books = summary.current.books.filter(b => b.spread !== 0);
+    if (books.length === 0) return null;
+    return `${books.map(b => `${b.book} at ${b.spread}`).join(', ')}`;
+  };
+
+  // Split text into sections by "7. Totals Intel" to apply context-appropriate replacements
+  const totalsIdx = result.search(/7\.\s*Totals Intel/i);
+
+  if (totalsIdx >= 0) {
+    const beforeTotals = result.slice(0, totalsIdx);
+    let totalsSection = result.slice(totalsIdx);
+
+    // Replace generic phrases in totals section
+    const totalReplacement = buildTotalReplacement();
+    if (totalReplacement) {
+      for (const pattern of genericPatterns) {
+        pattern.lastIndex = 0;
+        totalsSection = totalsSection.replace(pattern, totalReplacement);
+      }
+    }
+
+    // Replace generic phrases in pre-totals sections (spread context)
+    let spreadSection = beforeTotals;
+    const spreadReplacement = buildSpreadReplacement();
+    if (spreadReplacement) {
+      for (const pattern of genericPatterns) {
+        pattern.lastIndex = 0;
+        spreadSection = spreadSection.replace(pattern, spreadReplacement);
+      }
+    }
+
+    result = spreadSection + totalsSection;
+  } else {
+    // No totals section found; apply total replacement globally as best effort
+    const totalReplacement = buildTotalReplacement();
+    if (totalReplacement) {
+      for (const pattern of genericPatterns) {
+        pattern.lastIndex = 0;
+        result = result.replace(pattern, totalReplacement);
+      }
+    }
+  }
+
+  return result;
+}
+
 // ── HSA User Message Builder ──────────────────────────────────────
 
 function buildHsaUserMessage(
@@ -1212,8 +1298,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Claude returned empty response' });
     }
 
-    // Parse structured text response — extract key fields
-    const narrative = rawText;
+    // Post-process: replace generic book references with actual names
+    const narrative = postProcessBookNames(rawText, totalCoord, spreadCoord, summary);
 
     // Extract status tag from output
     const statusMatch = narrative.match(/\b(PASS|WATCH|ACTIVE)\b/);
