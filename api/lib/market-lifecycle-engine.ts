@@ -253,20 +253,20 @@ export function analyzeMarket(
   const openingLines = Object.values(openingByBook).map(s => s.line);
   const currentLines = Object.values(currentByBook).map(s => s.line);
 
-  const openingLine = median(openingLines) ?? 0;
-  const currentLine = median(currentLines) ?? 0;
+  const openingLine = mode(openingLines) ?? 0;
+  const currentLine = mode(currentLines) ?? 0;
   const openingTimestamp = sorted[0]?.timestamp || '';
   const latestTimestamp = sorted[sorted.length - 1]?.timestamp || '';
 
   // First consensus = median of first batch (snapshots within first 30 min)
   const firstBatchEnd = new Date(new Date(openingTimestamp).getTime() + 30 * 60000);
   const firstBatch = sorted.filter(s => new Date(s.timestamp) <= firstBatchEnd);
-  const firstConsensusLine = median(firstBatch.map(s => s.line)) ?? openingLine;
+  const firstConsensusLine = mode(firstBatch.map(s => s.line)) ?? openingLine;
   const firstConsensusTimestamp = firstBatch.length
     ? firstBatch[Math.floor(firstBatch.length / 2)].timestamp
     : openingTimestamp;
 
-  const consensusCurrentLine = median(currentLines) ?? 0;
+  const consensusCurrentLine = mode(currentLines) ?? 0;
   const booksReportingNow = Object.keys(currentByBook).length;
 
   // ── Data quality ────────────────────────────────────────────────────────
@@ -842,7 +842,7 @@ function buildConsensusTimeline(sorted: MarketSnapshot[]): TimelinePoint[] {
     const midSnap = snaps[Math.floor(snaps.length / 2)];
 
     timeline.push({
-      consensus: median(lines) ?? 0,
+      consensus: mode(lines) ?? 0,
       timestamp: midSnap.timestamp,
       bookCount: books.length,
       books,
@@ -1020,11 +1020,34 @@ function emptyPrimarySignal(): PrimarySignal {
   };
 }
 
-function median(nums: number[]): number | null {
+/**
+ * Compute consensus via MODE (most common value) — always a real book line.
+ * Replaces median() to prevent synthetic values from averaging two middle values.
+ * On ties, returns the value closest to the median position.
+ */
+function mode(nums: number[]): number | null {
   if (!nums.length) return null;
+  if (nums.length === 1) return nums[0];
+
+  const freq = new Map<number, number>();
+  for (const n of nums) freq.set(n, (freq.get(n) || 0) + 1);
+
+  let maxFreq = 0;
+  for (const count of freq.values()) {
+    if (count > maxFreq) maxFreq = count;
+  }
+
+  const candidates = [...freq.entries()]
+    .filter(([, count]) => count === maxFreq)
+    .map(([val]) => val);
+
+  if (candidates.length === 1) return candidates[0];
+
+  // On tie, pick closest to median position
   const sorted = [...nums].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  const medianVal = sorted[Math.floor(sorted.length / 2)];
+  candidates.sort((a, b) => Math.abs(a - medianVal) - Math.abs(b - medianVal));
+  return candidates[0];
 }
 
 function round2(n: number): number {

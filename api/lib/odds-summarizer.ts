@@ -1,6 +1,10 @@
 // NOTE: This is the reference copy of the odds summarizer.
 // The canonical copy used by the HSA pipeline is INLINED in api/generate-hsa.ts
 // due to Vercel bundler constraints. Keep both in sync when making changes.
+//
+// IMPORTANT: All consensus values use MODE (most common real book line).
+// NEVER average, interpolate, or create synthetic numbers.
+// If a bettor can't bet it, it doesn't appear in output.
 
 export interface OddsSnapshot {
   bookmaker: string;
@@ -73,8 +77,34 @@ export interface OddsSummary {
   };
 }
 
-function avg(nums: number[]): number {
-  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+/**
+ * Compute consensus via MODE (most common value) — always a real book line.
+ * On ties, returns the value closest to the median.
+ * NEVER returns averaged/synthetic numbers.
+ */
+function mode(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  if (nums.length === 1) return nums[0];
+
+  const freq = new Map<number, number>();
+  for (const n of nums) freq.set(n, (freq.get(n) || 0) + 1);
+
+  let maxFreq = 0;
+  for (const count of freq.values()) {
+    if (count > maxFreq) maxFreq = count;
+  }
+
+  const candidates = [...freq.entries()]
+    .filter(([, count]) => count === maxFreq)
+    .map(([val]) => val);
+
+  if (candidates.length === 1) return candidates[0];
+
+  // Tie: pick value closest to median
+  const sorted = [...nums].sort((a, b) => a - b);
+  const medianVal = sorted[Math.floor(sorted.length / 2)];
+  candidates.sort((a, b) => Math.abs(a - medianVal) - Math.abs(b - medianVal));
+  return candidates[0];
 }
 
 function round1(n: number): number {
@@ -152,8 +182,8 @@ export function summarizeOdds(
     if (!openingByBook[s.bookmaker]) openingByBook[s.bookmaker] = s;
   }
   const openingBooks = Object.values(openingByBook).map(toBookLine);
-  const openingConsensusSpread = round1(avg(openingBooks.map((b) => b.spread)));
-  const openingConsensusTotal = round1(avg(openingBooks.map((b) => b.total)));
+  const openingConsensusSpread = mode(openingBooks.map((b) => b.spread).filter(v => v !== 0));
+  const openingConsensusTotal = mode(openingBooks.map((b) => b.total).filter(v => v > 0));
 
   // Current: latest snapshot per book
   const currentByBook: Record<string, OddsSnapshot> = {};
@@ -161,12 +191,12 @@ export function summarizeOdds(
     currentByBook[s.bookmaker] = s;
   }
   const currentBooks = Object.values(currentByBook).map(toBookLine);
-  const currentConsensusSpread = round1(avg(currentBooks.map((b) => b.spread)));
-  const currentConsensusTotal = round1(avg(currentBooks.map((b) => b.total)));
+  const currentConsensusSpread = mode(currentBooks.map((b) => b.spread).filter(v => v !== 0));
+  const currentConsensusTotal = mode(currentBooks.map((b) => b.total).filter(v => v > 0));
 
-  // Movement
-  const spreadMovement = round1(currentConsensusSpread - openingConsensusSpread);
-  const totalMovement = round1(currentConsensusTotal - openingConsensusTotal);
+  // Movement — difference between real consensus (mode) lines
+  const spreadMovement = currentConsensusSpread - openingConsensusSpread;
+  const totalMovement = currentConsensusTotal - openingConsensusTotal;
 
   const spreadDirection =
     Math.abs(spreadMovement) < 0.5
@@ -184,6 +214,7 @@ export function summarizeOdds(
 
   const velocityPerHour =
     trackingHours > 0 ? round1(Math.abs(spreadMovement) / trackingHours) : 0;
+  // Note: velocity is a rate metric, not a tradable line — round1 is acceptable here
 
   // Book disagreement
   const currentSpreads = currentBooks.map((b) => b.spread);
@@ -219,8 +250,8 @@ export function summarizeOdds(
       minutesBefore: minsBefore,
       label,
       books: bl,
-      consensusSpread: round1(avg(bl.map((b) => b.spread))),
-      consensusTotal: round1(avg(bl.map((b) => b.total))),
+      consensusSpread: mode(bl.map((b) => b.spread).filter(v => v !== 0)),
+      consensusTotal: mode(bl.map((b) => b.total).filter(v => v > 0)),
     };
   });
 
@@ -276,8 +307,8 @@ export function summarizeOdds(
     trackingHours > 0 ? round1(Math.abs(totalMovement) / trackingHours) : 0;
 
   const timelineTotals = timeline.map((t) => t.consensusTotal).filter((t) => t > 0);
-  const highestTotalSeen = timelineTotals.length ? round1(Math.max(...timelineTotals)) : openingConsensusTotal;
-  const lowestTotalSeen = timelineTotals.length ? round1(Math.min(...timelineTotals)) : openingConsensusTotal;
+  const highestTotalSeen = timelineTotals.length ? Math.max(...timelineTotals) : openingConsensusTotal;
+  const lowestTotalSeen = timelineTotals.length ? Math.min(...timelineTotals) : openingConsensusTotal;
 
   const currentTotalsArr = currentBooks.map((b) => b.total).filter((t) => t > 0);
   const totalBookDisagreement =
