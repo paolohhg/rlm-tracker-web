@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { T, BADGE_COLORS } from '../lib/theme';
+import { T } from '../lib/theme';
 import type { GameView } from '../types';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -235,8 +235,6 @@ function SignalDetailPanel({ signalKey, game, tab }: { signalKey: SignalKey; gam
   const diff2 = data.side2MoneyPct != null && data.side2BetPct != null
     ? data.side2MoneyPct - data.side2BetPct : null;
 
-  const barColor = '#00a8ff';
-
   return (
     <div style={{
       background: '#0066ff',
@@ -278,7 +276,6 @@ function SignalDetailPanel({ signalKey, game, tab }: { signalKey: SignalKey; gam
         moneyPct={data.side1MoneyPct}
         diff={diff1}
         odds={data.side1Odds}
-        barColor={barColor}
         isTeam={data.columnLabel === 'TEAM'}
         tab={tab}
       />
@@ -290,7 +287,6 @@ function SignalDetailPanel({ signalKey, game, tab }: { signalKey: SignalKey; gam
         moneyPct={data.side2MoneyPct}
         diff={diff2}
         odds={data.side2Odds}
-        barColor={barColor}
         isTeam={data.columnLabel === 'TEAM'}
         tab={tab}
       />
@@ -307,9 +303,9 @@ const colHeader: React.CSSProperties = {
   fontFamily: T.font,
 };
 
-function SplitRow({ label, betPct, moneyPct, diff, odds, barColor, isTeam, tab }: {
+function SplitRow({ label, betPct, moneyPct, diff, odds, isTeam, tab }: {
   label: string; betPct: number | null; moneyPct: number | null; diff: number | null;
-  odds: string; barColor: string; isTeam: boolean; tab: MarketTab;
+  odds: string; isTeam: boolean; tab: MarketTab;
 }) {
   const shortLabel = isTeam ? label.split(' ').pop() ?? label : label;
   const showDiff = diff != null && Math.abs(diff) >= 1;
@@ -401,7 +397,6 @@ export function ProReport({ game, onClose }: { game: GameView; onClose: () => vo
   const mlCount = countSignals(game, 'moneyline');
 
   const signals = computeSignals(game, activeTab);
-  const data = getSplitData(game, activeTab);
 
   const isTotalTab = activeTab === 'total';
 
