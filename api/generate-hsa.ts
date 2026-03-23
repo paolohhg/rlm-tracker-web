@@ -1389,12 +1389,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Append lifecycle context and coordination intel as structured sections
     const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock;
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 3000,
-      system: HSA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: fullMessage }],
-    });
+    // Retry Anthropic API up to 2 times with exponential backoff
+    let response: Anthropic.Messages.Message | null = null;
+    let lastApiError: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await anthropic.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 3000,
+          system: HSA_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: fullMessage }],
+        });
+        break; // success
+      } catch (apiErr: any) {
+        lastApiError = apiErr;
+        console.error(`[HSA] Anthropic API attempt ${attempt + 1} failed: ${apiErr.message}`);
+        // Don't retry on 4xx (auth, bad request, etc.)
+        if (apiErr.status && apiErr.status >= 400 && apiErr.status < 500) break;
+        if (attempt < 2) {
+          const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+    }
+
+    if (!response) {
+      return res.status(502).json({
+        error: 'Anthropic API failed after retries',
+        detail: lastApiError?.message || 'Unknown error',
+      });
+    }
 
     const rawText =
       response.content[0].type === 'text' ? response.content[0].text : '';
