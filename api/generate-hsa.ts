@@ -111,6 +111,14 @@ Describe what the market is doing, not what someone should do.
 The Public Bias field MUST always contain "Sharp side:" with an explicit conclusion. Vague descriptions of public percentages without a sharp-side verdict are not acceptable.
 The Market Lean field MUST always name a specific team + number, Over/Under + number, or PASS. Never leave it directionally ambiguous.
 
+CRITICAL TEAM/SPREAD PAIRING RULE
+All spreads are from the HOME team's perspective. When writing Market Lean or any team + spread:
+- The HOME team's spread is the number shown in the data (e.g. if home spread is +2.5, the home team is the underdog at +2.5)
+- The AWAY team's spread is the OPPOSITE sign (e.g. if home spread is +2.5, the away team is the favorite at -2.5)
+- NEVER pair the away team name with the home team's spread number
+- If a MARKET LEAN DIRECTIVE section is provided, you MUST use that exact lean verbatim
+- Example: if Home=Dallas spread is +2.5 and Away=Warriors, then Dallas is +2.5 underdog and Warriors are -2.5 favorite. Writing "Warriors +2.5" is WRONG.
+
 CRITICAL SPORTSBOOK ATTRIBUTION RULE
 Every section that discusses line movement MUST name exact sportsbooks.
 Never write generic phrases like "books moved", "multiple sportsbooks", "sportsbooks coordinated", or "market shifted".
@@ -1532,11 +1540,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // ── Pre-computed Market Lean Directive ─────────────────────────────
+    // Build an explicit lean directive from the lifecycle engine so Claude
+    // doesn't pair the wrong team with the wrong spread number.
+    // Spreads are from HOME perspective — the lean label must correctly
+    // pair the team name with THEIR spread (not the opponent's).
+    let leanDirective = '';
+    if (lifecycle.spread?.final_read.market_lean && lifecycle.spread.final_read.market_lean !== 'PASS') {
+      const spreadLean = lifecycle.spread.final_read.market_lean;
+      const totalLean = lifecycle.total?.final_read.market_lean ?? 'PASS';
+      const spreadConf = lifecycle.spread.final_read.confidence;
+
+      leanDirective = [
+        '\n=== MARKET LEAN DIRECTIVE (USE VERBATIM) ===',
+        'IMPORTANT: The market lean below was pre-computed from the lifecycle analysis.',
+        'You MUST use this EXACT team name + number in your Market Lean field.',
+        'Do NOT swap the team name or flip the spread sign.',
+        '',
+        `SPREAD LEAN: ${spreadLean}`,
+        `SPREAD CONFIDENCE: ${spreadConf}`,
+        totalLean !== 'PASS' ? `TOTAL LEAN: ${totalLean}` : '',
+        '',
+        'TEAM/SPREAD PAIRING RULE:',
+        `  Home team (${home_team}) spread: ${summary.current.consensusSpread > 0 ? '+' : ''}${summary.current.consensusSpread}`,
+        `  Away team (${away_team}) spread: ${-summary.current.consensusSpread > 0 ? '+' : ''}${-summary.current.consensusSpread}`,
+        `  If you lean toward ${home_team}, write: "${home_team} ${summary.current.consensusSpread > 0 ? '+' : ''}${summary.current.consensusSpread}"`,
+        `  If you lean toward ${away_team}, write: "${away_team} ${-summary.current.consensusSpread > 0 ? '+' : ''}${-summary.current.consensusSpread}"`,
+        '  NEVER pair the away team name with the home spread number or vice versa.',
+      ].filter(l => l !== '').join('\n');
+
+      console.log(`[HSA LEAN DIRECTIVE] ${spreadLean} (${spreadConf})`);
+    }
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context, coordination intel, and NHL classification as structured sections
+    // Append lifecycle context, coordination intel, lean directive, and NHL classification as structured sections
     const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock
+      + (leanDirective ? '\n\n' + leanDirective : '')
       + (nhlClassificationBlock ? '\n\n' + nhlClassificationBlock : '');
 
     const response = await anthropic.messages.create({
@@ -1577,7 +1618,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Extract market lean from "Market Lean:" line
     const leanMatch = narrative.match(/Market Lean:\s*(.+)/i);
-    const marketLean = leanMatch?.[1]?.trim() || 'PASS';
+    let marketLean = leanMatch?.[1]?.trim() || 'PASS';
+
+    // ── Post-process: fix wrong team/spread pairing ───────────────────
+    // Claude sometimes pairs the away team name with the home spread (+)
+    // or vice versa. If the lifecycle engine computed a lean, use it as
+    // the authoritative source to correct any team/spread mismatch.
+    if (marketLean !== 'PASS' && lifecycle.spread?.final_read.market_lean &&
+        lifecycle.spread.final_read.market_lean !== 'PASS') {
+      const lifecycleLean = lifecycle.spread.final_read.market_lean;
+      const homeSpread = summary.current.consensusSpread;
+
+      // Check if Claude wrote the wrong team+number pairing
+      // e.g. "Warriors +2.5" when Warriors are actually -2.5
+      const awayWithHomeSpread = `${away_team} ${homeSpread > 0 ? '+' : ''}${homeSpread}`;
+      const homeWithAwaySpread = `${home_team} ${-homeSpread > 0 ? '+' : ''}${-homeSpread}`;
+
+      if (marketLean === awayWithHomeSpread || marketLean === homeWithAwaySpread) {
+        console.log(`[HSA LEAN FIX] Claude wrote "${marketLean}" — wrong team/spread pairing. Using lifecycle lean: "${lifecycleLean}"`);
+        marketLean = lifecycleLean;
+        // Also fix in the narrative text
+        if (leanMatch) {
+          narrative = narrative.replace(
+            /Market Lean:\s*.+/i,
+            `Market Lean: ${lifecycleLean}`
+          );
+        }
+      }
+    }
 
     // Extract confidence from "Confidence:" line
     const confMatch = narrative.match(/Confidence:\s*(Low|Moderate|High)/i);
