@@ -781,9 +781,16 @@ function buildLeanLabel(
     return 'PASS';
   }
 
-  // Spread
-  if (direction === 'toward_home') return `${homeTeam} ${currentLine}`;
-  if (direction === 'toward_away') return `${awayTeam} ${currentLine > 0 ? '+' : ''}${-currentLine}`;
+  // Spread — currentLine is from HOME perspective (negative = home favored)
+  // toward_home: home team getting more favored, show home team + their line
+  // toward_away: away team getting more favored, show away team + flipped line
+  if (direction === 'toward_home') {
+    return `${homeTeam} ${currentLine > 0 ? '+' : ''}${currentLine}`;
+  }
+  if (direction === 'toward_away') {
+    const awayLine = -currentLine;
+    return `${awayTeam} ${awayLine > 0 ? '+' : ''}${awayLine}`;
+  }
   return 'PASS';
 }
 
