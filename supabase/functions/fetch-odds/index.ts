@@ -34,9 +34,17 @@ function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
   // 12–48 hours out → poll every 30 min (handled by cron, just let it through)
   if (hoursUntil <= 48) return true;
 
-  // More than 48 hours out → only capture if not yet seen (opening line capture)
-  // Once we have a snapshot, skip until within 48h
-  if (!alreadySeen) return true; // Always grab opening line first time
+  // 48h–7 days out → capture if not yet seen, or every ~2h for MLB/NHL
+  // (MLB Opening Day lines need tracking before they're within 48h)
+  if (hoursUntil <= 168) {
+    if (!alreadySeen) return true; // Always grab opening line first time
+    // For already-seen games 48h+ out, let cron handle periodic updates
+    // (cron runs every 15min, but shouldPoll gates it)
+    return true; // Capture all games within 7 days
+  }
+
+  // More than 7 days out → only capture if not yet seen (opening line capture)
+  if (!alreadySeen) return true;
 
   return false; // Already have opener, skip until closer
 }
@@ -57,6 +65,7 @@ serve(async () => {
   const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
   const rows: Record<string, unknown>[] = [];
+  const openerRows: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
   let apiCalls = 0;
 
@@ -68,6 +77,18 @@ serve(async () => {
   const seenGames = new Set<string>(
     (seenRows ?? []).map((r: any) => `${r.league}|${r.home_team}|${r.away_team}`)
   );
+
+  // Load existing openers to avoid re-inserting
+  const { data: existingOpeners } = await supabase
+    .from("book_openers")
+    .select("league, home_team, away_team, sportsbook, market_type");
+  const openerKeys = new Set<string>(
+    (existingOpeners ?? []).map((r: any) =>
+      `${r.league}|${r.home_team}|${r.away_team}|${r.sportsbook}|${r.market_type}`)
+  );
+
+  // Track game counts for debug
+  const mlbGames: { home: string; away: string; time: string; books: number }[] = [];
 
   for (const { key, league } of LEAGUES) {
     const markets = marketsForLeague(key, league);
@@ -85,13 +106,25 @@ serve(async () => {
 
     for (const game of games) {
       const commenceTime = game.commence_time as string;
-      const gameSeenKey = `${league}|${game.home_team}|${game.away_team}`;
+      const homeTeam = game.home_team as string;
+      const awayTeam = game.away_team as string;
+      const gameSeenKey = `${league}|${homeTeam}|${awayTeam}`;
       const alreadySeen = seenGames.has(gameSeenKey);
 
       // Smart polling — always capture openers, throttle far-out games
       if (!shouldPoll(commenceTime, alreadySeen)) continue;
 
       const bookmakers = (game.bookmakers as Record<string, unknown>[]) ?? [];
+
+      // Track MLB games for debug output
+      if (league === "MLB" && !key.includes("preseason")) {
+        mlbGames.push({
+          home: homeTeam,
+          away: awayTeam,
+          time: commenceTime,
+          books: bookmakers.length,
+        });
+      }
 
       for (const bookmaker of bookmakers) {
         const bookKey = bookmaker.key as string;
@@ -116,7 +149,7 @@ serve(async () => {
 
           if (mKey === "spreads") {
             for (const o of outcomes) {
-              if (o.name === game.home_team) {
+              if (o.name === homeTeam) {
                 spread = o.point as number;
                 spreadHomePrice = o.price as number;
               }
@@ -125,8 +158,8 @@ serve(async () => {
 
           if (mKey === "h2h") {
             for (const o of outcomes) {
-              if (o.name === game.home_team) moneylineHome = o.price as number;
-              if (o.name === game.away_team) moneylineAway = o.price as number;
+              if (o.name === homeTeam) moneylineHome = o.price as number;
+              if (o.name === awayTeam) moneylineAway = o.price as number;
             }
           }
 
@@ -140,11 +173,11 @@ serve(async () => {
           // MLB runline (alternate_runlines or spreads for MLB)
           if (mKey === "alternate_runlines" || (league === "MLB" && mKey === "spreads")) {
             for (const o of outcomes) {
-              if (o.name === game.home_team) {
+              if (o.name === homeTeam) {
                 runlineHome = o.point as number;
                 runlineHomePrice = o.price as number;
               }
-              if (o.name === game.away_team) {
+              if (o.name === awayTeam) {
                 runlineAway = o.point as number;
                 runlineAwayPrice = o.price as number;
               }
@@ -155,27 +188,57 @@ serve(async () => {
         rows.push({
           league,
           game_time: commenceTime,
-          home_team: game.home_team,
-          away_team: game.away_team,
+          home_team: homeTeam,
+          away_team: awayTeam,
           bookmaker: bookKey,
           book_type: bookType,
-          // Spread
           spread,
           spread_home_price: spreadHomePrice,
-          // Moneyline
           moneyline_home: moneylineHome,
           moneyline_away: moneylineAway,
-          // Totals
           total,
           total_over_price: totalOverPrice,
           total_under_price: totalUnderPrice,
-          // Runline (MLB)
           runline_home: runlineHome,
           runline_away: runlineAway,
           runline_home_price: runlineHomePrice,
           runline_away_price: runlineAwayPrice,
           fetched_at: now,
         });
+
+        // ── Per-book opener tracking ────────────────────────────────
+        // Save first-ever line as opener. Uses upsert with ON CONFLICT
+        // DO NOTHING so existing openers are never overwritten.
+        const openerBase = { league, home_team: homeTeam, away_team: awayTeam, game_time: commenceTime, sportsbook: bookKey };
+
+        if (moneylineHome != null) {
+          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|moneyline`;
+          if (!openerKeys.has(opKey)) {
+            openerRows.push({ ...openerBase, market_type: "moneyline", opener_value: moneylineHome, opener_price: moneylineAway, first_seen_at: now });
+            openerKeys.add(opKey);
+          }
+        }
+        if (spread != null) {
+          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|spread`;
+          if (!openerKeys.has(opKey)) {
+            openerRows.push({ ...openerBase, market_type: "spread", opener_value: spread, opener_price: spreadHomePrice, first_seen_at: now });
+            openerKeys.add(opKey);
+          }
+        }
+        if (total != null) {
+          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|total`;
+          if (!openerKeys.has(opKey)) {
+            openerRows.push({ ...openerBase, market_type: "total", opener_value: total, opener_price: totalOverPrice, first_seen_at: now });
+            openerKeys.add(opKey);
+          }
+        }
+        if (runlineHome != null) {
+          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|runline`;
+          if (!openerKeys.has(opKey)) {
+            openerRows.push({ ...openerBase, market_type: "runline", opener_value: runlineHome, opener_price: runlineHomePrice, first_seen_at: now });
+            openerKeys.add(opKey);
+          }
+        }
       }
     }
   }
@@ -184,9 +247,23 @@ serve(async () => {
     return new Response(JSON.stringify({ error: "No rows collected", api_calls: apiCalls }), { status: 200 });
   }
 
+  // Insert odds snapshots
   const { error } = await supabase.from("odds_snapshots").insert(rows);
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+
+  // Insert openers (ON CONFLICT DO NOTHING — never overwrite existing openers)
+  let openersInserted = 0;
+  if (openerRows.length > 0) {
+    const { error: openerErr, count } = await supabase
+      .from("book_openers")
+      .upsert(openerRows, { onConflict: "league,home_team,away_team,game_time,sportsbook,market_type", ignoreDuplicates: true });
+    if (openerErr) {
+      console.error("Opener insert error:", openerErr.message);
+    } else {
+      openersInserted = openerRows.length;
+    }
   }
 
   // Count rows per league for debugging
@@ -195,10 +272,23 @@ serve(async () => {
     leagueCounts[r.league as string] = (leagueCounts[r.league as string] || 0) + 1;
   }
 
+  // Count MLB games by date
+  const mlbByDate: Record<string, number> = {};
+  for (const g of mlbGames) {
+    const dateStr = g.time.split("T")[0];
+    mlbByDate[dateStr] = (mlbByDate[dateStr] || 0) + 1;
+  }
+
   return new Response(JSON.stringify({
     inserted: rows.length,
+    openers_saved: openersInserted,
     api_calls: apiCalls,
     leagues: LEAGUES.map(l => l.league),
     league_counts: leagueCounts,
+    mlb_games: {
+      total: mlbGames.length,
+      by_date: mlbByDate,
+      sample: mlbGames.slice(0, 5).map(g => `${g.away} @ ${g.home} (${g.time}, ${g.books} books)`),
+    },
   }), { status: 200 });
 });
