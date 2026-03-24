@@ -115,7 +115,24 @@ CRITICAL SPORTSBOOK ATTRIBUTION RULE
 Every section that discusses line movement MUST name exact sportsbooks.
 Never write generic phrases like "books moved", "multiple sportsbooks", "sportsbooks coordinated", or "market shifted".
 Always write: "[BookName], [BookName], and [BookName] moved X → Y within Z minutes, while [BookName] held X."
-Use the BOOK COORDINATION INTEL section provided in the input data as your source of truth for which books moved, held, led, and followed.`;
+Use the BOOK COORDINATION INTEL section provided in the input data as your source of truth for which books moved, held, led, and followed.
+
+NHL-SPECIFIC RULES
+When analyzing NHL games, follow these additional rules:
+
+1. PUCK-LINE STATE FLIPS: NHL puck lines are state-based around 1.5. A move from -1.5 to +1.5 is a STATE FLIP, NOT a "3-point spread move." Never describe puck-line flips using point-based language. Instead say: "The puck line flipped state from favorite to underdog pricing" or "The market flipped the puck-line state, but broad confirmation is still incomplete."
+
+2. FORBIDDEN NHL LANGUAGE (unless truly earned):
+- "3-point steam" or any numeric point description for a puck-line flip
+- "high confidence steam" with only 2 books moving
+- "market-wide confirmation" when books are split
+- "strong sharp signal" if fake steam is active
+
+3. SIGNAL PRIORITY FOR NHL SIDES: Moneyline > Public divergence > Book coordination > Puck line > Total > Velocity. If only the puck line is chaotic but moneyline is stable, treat puck-line movement as weak unless broader confirmation exists.
+
+4. COORDINATION THRESHOLDS: 1 book = isolated (never call steam), 2 books = partial (never call confirmed steam), 3 books = meaningful coordination, 4+ books = strong confirmation.
+
+5. If an NHL MARKET CLASSIFICATION section is provided in the input, you MUST respect its signal_type, confidence, and status values. Do not override the pre-computed classification with your own interpretation.`;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -495,7 +512,19 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
     const timeDiff = timeline[i - 1].minutesBefore - timeline[i].minutesBefore;
     if (diff >= 1 && timeDiff <= 30) {
       steamMove = true;
-      steamDetail = `${diff}-point move in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      // NHL puck-line state flip: don't describe as numeric point move
+      const prevSpread = timeline[i - 1].consensusSpread;
+      const currSpread = timeline[i].consensusSpread;
+      const isNhlPucklineFlip = league === 'NHL' && (
+        (prevSpread === -1.5 && currSpread === 1.5) ||
+        (prevSpread === 1.5 && currSpread === -1.5) ||
+        (prevSpread === -1.5 && currSpread === -1.5) === false // type guard
+      ) && Math.abs(prevSpread) === 1.5 && Math.abs(currSpread) === 1.5 && prevSpread !== currSpread;
+      if (isNhlPucklineFlip) {
+        steamDetail = `Puck-line state flip (${prevSpread} → ${currSpread}) in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      } else {
+        steamDetail = `${diff}-point move in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      }
       break;
     }
   }
@@ -1406,11 +1435,109 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`[HSA COORD BLOCK]\n${coordBlock}`);
 
+    // ── NHL Signal Classification ─────────────────────────────────────
+    // For NHL games, run the NHL-specific classifier to prevent
+    // puck-line state flips from being described as "3-point steam moves"
+    // and to enforce proper coordination thresholds.
+    let nhlClassificationBlock = '';
+    if (league === 'NHL') {
+      try {
+        const {
+          getNhlSignalType,
+          getNhlTotalsSignalType,
+          buildNhlClassificationBlock,
+          isPucklineStateFlip,
+        } = await import('./lib/nhl-signal-classifier');
+
+        // Determine ML direction
+        const mlOpenHome = summary.opening.books.length > 0
+          ? mode(summary.opening.books.map(b => b.mlHome).filter(v => v !== 0))
+          : 0;
+        const mlCurrHome = summary.current.books.length > 0
+          ? mode(summary.current.books.map(b => b.mlHome).filter(v => v !== 0))
+          : 0;
+        const mlDelta = (mlCurrHome ?? 0) - (mlOpenHome ?? 0);
+        const mlDir = mlDelta > 5 ? 'toward_away' as const :
+                      mlDelta < -5 ? 'toward_home' as const : 'none' as const;
+
+        // Determine persistence from lifecycle data
+        const spreadLifecycle = lifecycle.spread;
+        const movePersistedSnapshots = spreadLifecycle
+          ? (spreadLifecycle.has_held_post_move ? 3 : (spreadLifecycle.current_state.holding_near_level ? 2 : 1))
+          : 1;
+        const hasSnappedBack = spreadLifecycle
+          ? (spreadLifecycle.has_retraced && spreadLifecycle.percent_of_primary_move_retraced > 50)
+          : false;
+
+        // Compute fake steam from existing detector
+        const { computeFakeSteam } = await import('../src/lib/intelligence/fake-steam');
+        const currentSpreadLines = summary.current.books
+          .map(b => b.spread)
+          .filter(s => s !== 0);
+        const fakeSteamResult = computeFakeSteam({ bookLines: currentSpreadLines });
+
+        const sideClassification = getNhlSignalType({
+          league,
+          homeTeam: home_team,
+          awayTeam: away_team,
+          openingSpread: summary.opening.consensusSpread,
+          currentSpread: summary.current.consensusSpread,
+          spreadBooksMovedCount: spreadCoord?.movedBooks.length ?? 0,
+          spreadBooksHeldCount: spreadCoord?.heldBooks.length ?? 0,
+          spreadBooksMoved: spreadCoord?.movedBooks.map(b => b.book) ?? [],
+          spreadBooksHeld: spreadCoord?.heldBooks.map(b => b.book) ?? [],
+          spreadMoveTimeWindowMinutes: spreadCoord?.timeWindowMinutes ?? 0,
+          openingMlHome: mlOpenHome ?? 0,
+          currentMlHome: mlCurrHome ?? 0,
+          mlBooksMovedCount: mlCoord?.movedBooks.length ?? 0,
+          mlDirection: mlDir,
+          publicTicketPctHome: splitsData?.homeBetsPct ?? 50,
+          publicMoneyPctHome: splitsData?.homeMoneyPct ?? 50,
+          openingTotal: summary.opening.consensusTotal,
+          currentTotal: summary.current.consensusTotal,
+          totalBooksMovedCount: totalCoord?.movedBooks.length ?? 0,
+          totalBooksHeldCount: totalCoord?.heldBooks.length ?? 0,
+          totalBooksMoved: totalCoord?.movedBooks.map(b => b.book) ?? [],
+          totalBooksHeld: totalCoord?.heldBooks.map(b => b.book) ?? [],
+          movePersistedSnapshots,
+          hasSnappedBack,
+          fakeSteamTriggered: fakeSteamResult.isFakeSteam,
+          fakeSteamScore: fakeSteamResult.fakeSteamScore,
+        });
+
+        // Totals classification
+        const totalsClassification = getNhlTotalsSignalType({
+          openingTotal: summary.opening.consensusTotal,
+          currentTotal: summary.current.consensusTotal,
+          booksMovedCount: totalCoord?.movedBooks.length ?? 0,
+          booksHeldCount: totalCoord?.heldBooks.length ?? 0,
+          booksMoved: totalCoord?.movedBooks.map(b => b.book) ?? [],
+          booksHeld: totalCoord?.heldBooks.map(b => b.book) ?? [],
+        });
+
+        nhlClassificationBlock = buildNhlClassificationBlock(sideClassification, totalsClassification);
+        console.log(`[HSA NHL] Classification: ${sideClassification.signal_type} / ${sideClassification.confidence} / ${sideClassification.coordination_tier}`);
+        console.log(`[HSA NHL] Puck-line state flip: ${sideClassification.puckline_state_flip}`);
+        console.log(`[HSA NHL] Totals: ${totalsClassification.signal_type} / ${totalsClassification.confidence}`);
+
+        // Override the steam description in summary if it's a puck-line state flip
+        if (isPucklineStateFlip(summary.opening.consensusSpread, summary.current.consensusSpread)) {
+          if (summary.sharpIndicators.steamMove && summary.sharpIndicators.steamDetail) {
+            summary.sharpIndicators.steamDetail =
+              `PUCKLINE STATE FLIP (not a numeric steam move) — ${summary.sharpIndicators.steamDetail?.replace(/\d+-point move/, 'state flip')}`;
+          }
+        }
+      } catch (nhlErr: any) {
+        console.error('[HSA] NHL classification failed (non-fatal):', nhlErr.message);
+      }
+    }
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context and coordination intel as structured sections
-    const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock;
+    // Append lifecycle context, coordination intel, and NHL classification as structured sections
+    const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock
+      + (nhlClassificationBlock ? '\n\n' + nhlClassificationBlock : '');
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
