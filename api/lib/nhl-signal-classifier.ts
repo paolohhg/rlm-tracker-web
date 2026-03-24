@@ -211,11 +211,14 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
     input.openingMlHome, input.currentMlHome, spreadDirection,
   );
 
-  // Build lean label
+  // Build lean label — currentSpread is from HOME perspective
+  // toward_home: show home team + home spread
+  // toward_away: show away team + flipped spread
   const leanTeam = spreadDirection === 'toward_home' ? input.homeTeam :
                    spreadDirection === 'toward_away' ? input.awayTeam : 'PASS';
+  const leanSpread = spreadDirection === 'toward_away' ? -input.currentSpread : input.currentSpread;
   const leanLine = spreadDirection !== 'none'
-    ? `${leanTeam} ${input.currentSpread > 0 ? '+' : ''}${input.currentSpread}`
+    ? `${leanTeam} ${leanSpread > 0 ? '+' : ''}${leanSpread}`
     : 'PASS';
 
   // ── NHL Weighted Score ─────────────────────────────────────────────────
