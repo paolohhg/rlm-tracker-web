@@ -34,16 +34,12 @@ function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
   // 12–48 hours out → poll every 30 min (handled by cron, just let it through)
   if (hoursUntil <= 48) return true;
 
-  // 48h–7 days out → capture if not yet seen, or every ~2h for MLB/NHL
-  // (MLB Opening Day lines need tracking before they're within 48h)
-  if (hoursUntil <= 168) {
-    if (!alreadySeen) return true; // Always grab opening line first time
-    // For already-seen games 48h+ out, let cron handle periodic updates
-    // (cron runs every 15min, but shouldPoll gates it)
-    return true; // Capture all games within 7 days
+  // 48h–10 days out → always capture (need early openers for MLB/NHL)
+  if (hoursUntil <= 240) {
+    return true;
   }
 
-  // More than 7 days out → only capture if not yet seen (opening line capture)
+  // More than 10 days out → only capture if not yet seen (opening line capture)
   if (!alreadySeen) return true;
 
   return false; // Already have opener, skip until closer
@@ -95,7 +91,7 @@ serve(async () => {
   const { data: seenRows } = await supabase
     .from("odds_snapshots")
     .select("home_team, away_team, league")
-    .gte("fetched_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+    .gte("fetched_at", new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString());
   const seenGames = new Set<string>(
     (seenRows ?? []).map((r: any) => `${r.league}|${r.home_team}|${r.away_team}`)
   );
@@ -112,9 +108,13 @@ serve(async () => {
   // Track game counts for debug
   const mlbGames: { home: string; away: string; time: string; books: number }[] = [];
 
+  // Request games up to 10 days out so we capture openers early
+  // (e.g. MLB Opening Day lines posted days before first pitch)
+  const commenceTimeTo = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+
   for (const { key, league } of LEAGUES) {
     const markets = marketsForLeague(key, league);
-    const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
+    const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}&commenceTimeTo=${commenceTimeTo}`;
 
     let games: Record<string, unknown>[];
     try {
