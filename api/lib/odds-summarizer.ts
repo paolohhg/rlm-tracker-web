@@ -226,8 +226,8 @@ export function summarizeOdds(
     Math.abs(spreadMovement) < 0.5
       ? 'stable'
       : spreadMovement < 0
-        ? 'toward home favorite'
-        : 'toward away / home underdog';
+        ? 'toward home'
+        : 'toward away';
 
   const totalDirection =
     Math.abs(totalMovement) < 0.5

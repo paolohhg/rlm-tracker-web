@@ -558,6 +558,8 @@ export function describeNhlSpreadMove(
   currentLine: number,
   booksMovedCount: number,
   isFlip: boolean,
+  homeTeam?: string,
+  awayTeam?: string,
 ): string {
   if (isFlip) {
     if (openLine === -1.5 && currentLine === 1.5) {
@@ -571,8 +573,13 @@ export function describeNhlSpreadMove(
   const delta = Math.abs(currentLine - openLine);
   if (delta < 0.25) return 'The puck line has not moved meaningfully';
 
-  const direction = currentLine > openLine ? 'toward underdog' : 'toward favorite';
-  return `The puck line moved ${delta} points ${direction} across ${booksMovedCount} book${booksMovedCount !== 1 ? 's' : ''}`;
+  // Movement direction is relative to which team benefits:
+  // currentLine < openLine (numeric decrease) = toward home (better for home whether fav or dog)
+  // currentLine > openLine (numeric increase) = toward away (better for away whether fav or dog)
+  const towardTeam = currentLine < openLine
+    ? (homeTeam ?? 'home')
+    : (awayTeam ?? 'away');
+  return `The puck line moved ${delta} points toward ${towardTeam} across ${booksMovedCount} book${booksMovedCount !== 1 ? 's' : ''}`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
