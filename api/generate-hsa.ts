@@ -1171,22 +1171,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const windowStart = new Date(gameTimeDate.getTime() - 24 * 60 * 60 * 1000).toISOString();
     const windowEnd = new Date(gameTimeDate.getTime() + 4 * 60 * 60 * 1000).toISOString();
 
-    const { data: oddsDesc, error: oddsError } = await supabase
-      .from('odds_snapshots')
-      .select('*')
-      .eq('league', league)
-      .eq('home_team', home_team)
-      .eq('away_team', away_team)
-      .gte('game_time', windowStart)
-      .lte('game_time', windowEnd)
-      .order('fetched_at', { ascending: false })
-      .limit(1000);
+    // Retry Supabase query up to 3 times (handles transient timeouts/connection issues)
+    let oddsDesc: any[] | null = null;
+    let oddsError: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await supabase
+        .from('odds_snapshots')
+        .select('bookmaker,spread,spread_home_price,moneyline_home,moneyline_away,total,total_over_price,fetched_at,league,game_time,home_team,away_team,book_type')
+        .eq('league', league)
+        .eq('home_team', home_team)
+        .eq('away_team', away_team)
+        .gte('game_time', windowStart)
+        .lte('game_time', windowEnd)
+        .order('fetched_at', { ascending: false })
+        .limit(1000);
+
+      if (!result.error) {
+        oddsDesc = result.data;
+        oddsError = null;
+        break;
+      }
+
+      oddsError = result.error;
+      console.error(`[HSA] Supabase odds query attempt ${attempt + 1} failed:`, {
+        message: oddsError.message,
+        code: oddsError.code,
+        hint: oddsError.hint,
+        details: oddsError.details,
+        league, home_team, away_team, game_time,
+      });
+
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt + 1) * 1000));
+      }
+    }
 
     // Reverse to ascending for summarizer (it expects chronological order)
     const odds = oddsDesc ? [...oddsDesc].reverse() : null;
 
     if (oddsError) {
-      return res.status(500).json({ error: 'Failed to fetch odds', detail: oddsError.message });
+      return res.status(500).json({
+        error: 'Failed to fetch odds',
+        detail: oddsError.message,
+        code: oddsError.code,
+        hint: oddsError.hint,
+      });
     }
 
     if (!odds?.length) {
@@ -1580,12 +1609,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       + (leanDirective ? '\n\n' + leanDirective : '')
       + (nhlClassificationBlock ? '\n\n' + nhlClassificationBlock : '');
 
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 3000,
-      system: HSA_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: fullMessage }],
-    });
+    // Retry Anthropic API up to 2 times with exponential backoff
+    let response: Anthropic.Messages.Message | null = null;
+    let lastApiError: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await anthropic.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 3000,
+          system: HSA_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: fullMessage }],
+        });
+        break; // success
+      } catch (apiErr: any) {
+        lastApiError = apiErr;
+        console.error(`[HSA] Anthropic API attempt ${attempt + 1} failed: ${apiErr.message}`);
+        // Don't retry on 4xx (auth, bad request, etc.)
+        if (apiErr.status && apiErr.status >= 400 && apiErr.status < 500) break;
+        if (attempt < 2) {
+          const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+    }
+
+    if (!response) {
+      return res.status(502).json({
+        error: 'Anthropic API failed after retries',
+        detail: lastApiError?.message || 'Unknown error',
+      });
+    }
 
     const rawText =
       response.content[0].type === 'text' ? response.content[0].text : '';
