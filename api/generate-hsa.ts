@@ -1210,11 +1210,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const odds = oddsDesc ? [...oddsDesc].reverse() : null;
 
     if (oddsError) {
+      console.error('[HSA] Supabase odds query error:', JSON.stringify(oddsError));
       return res.status(500).json({
-        error: 'Failed to fetch odds',
+        error: `Failed to fetch odds: ${oddsError.message || oddsError.code || 'unknown error'}`,
         detail: oddsError.message,
         code: oddsError.code,
         hint: oddsError.hint,
+        query_params: { league, home_team, away_team, game_time, windowStart, windowEnd },
       });
     }
 
