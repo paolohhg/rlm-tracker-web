@@ -7,6 +7,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
+// Allow up to 60s (Hobby plan max) — fetching 6 leagues needs time
+export const maxDuration = 60;
+
 // ── Leagues to track ─────────────────────────────────────────
 const LEAGUES = [
   { key: 'basketball_nba',         league: 'NBA'   },
@@ -92,35 +95,33 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
   const mlbGames: { home: string; away: string; time: string; books: number }[] = [];
   const commenceTimeTo = new Date(Date.now() + 10 * 24 * 3600000).toISOString();
 
-  for (const { key, league } of LEAGUES) {
-    const markets = marketsForLeague(league);
-    const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}&commenceTimeTo=${commenceTimeTo}`;
-
-    let games: Record<string, unknown>[];
-    try {
+  // Fetch all leagues in parallel to stay within Vercel timeout
+  const leagueResults = await Promise.allSettled(
+    LEAGUES.map(async ({ key, league }) => {
+      const markets = marketsForLeague(league);
+      const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}&commenceTimeTo=${commenceTimeTo}`;
       const response = await fetchWithRetry(url);
-      apiCalls++;
       const body = await response.json();
       if (!response.ok) {
-        const errMsg = `${league} (${key}): HTTP ${response.status} — ${JSON.stringify(body).slice(0, 200)}`;
-        console.error(`[fetch-odds] ${errMsg}`);
-        errors.push(errMsg);
-        continue;
+        throw new Error(`HTTP ${response.status} — ${JSON.stringify(body).slice(0, 200)}`);
       }
-      games = body as Record<string, unknown>[];
-      if (!Array.isArray(games)) {
-        const errMsg = `${league} (${key}): non-array response: ${JSON.stringify(body).slice(0, 200)}`;
-        console.error(`[fetch-odds] ${errMsg}`);
-        errors.push(errMsg);
-        continue;
+      if (!Array.isArray(body)) {
+        throw new Error(`non-array response: ${JSON.stringify(body).slice(0, 200)}`);
       }
-      console.log(`[fetch-odds] ${league} (${key}): ${games.length} games`);
-    } catch (err: any) {
-      const errMsg = `${league} (${key}): ${err.message}`;
+      return { key, league, games: body as Record<string, unknown>[] };
+    })
+  );
+
+  for (const result of leagueResults) {
+    apiCalls++;
+    if (result.status === 'rejected') {
+      const errMsg = `League fetch failed: ${result.reason?.message ?? result.reason}`;
       console.error(`[fetch-odds] ${errMsg}`);
       errors.push(errMsg);
       continue;
     }
+    const { key, league, games } = result.value;
+    console.log(`[fetch-odds] ${league} (${key}): ${games.length} games`);
 
     for (const game of games) {
       const commenceTime = game.commence_time as string;
