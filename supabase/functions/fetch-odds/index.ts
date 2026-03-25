@@ -127,6 +127,11 @@ serve(async () => {
         errors.push(errMsg);
         continue;
       }
+      // Log game count per sport key so we can see when MLB goes live
+      console.log(`[fetch-odds] ${league} (${key}): ${games.length} games returned`);
+      if (games.length === 0) {
+        console.log(`[fetch-odds] ${league} (${key}): 0 games — API may not have lines posted yet`);
+      }
     } catch (err: any) {
       const errMsg = `[fetch-odds] ${league} (${key}): Failed after retries — ${err.message}`;
       console.error(errMsg);
