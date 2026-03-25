@@ -1477,12 +1477,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? (spreadLifecycle.has_retraced && spreadLifecycle.percent_of_primary_move_retraced > 50)
           : false;
 
-        // Compute fake steam from existing detector
-        const { computeFakeSteam } = await import('../src/lib/intelligence/fake-steam');
+        // Compute fake steam inline (can't import from src/ in Vercel API routes)
         const currentSpreadLines = summary.current.books
           .map(b => b.spread)
           .filter(s => s !== 0);
-        const fakeSteamResult = computeFakeSteam({ bookLines: currentSpreadLines });
+        let fakeSteamTriggered = false;
+        let fakeSteamScore = 0;
+        if (currentSpreadLines.length >= 3) {
+          const sortedLines = [...currentSpreadLines].sort((a, b) => a - b);
+          const midIdx = Math.floor(sortedLines.length / 2);
+          const medianVal = sortedLines.length % 2 === 0
+            ? (sortedLines[midIdx - 1] + sortedLines[midIdx]) / 2
+            : sortedLines[midIdx];
+          const marketRange = sortedLines[sortedLines.length - 1] - sortedLines[0];
+          const outlierCount = currentSpreadLines.filter(l => Math.abs(l - medianVal) >= 0.5).length;
+          if (marketRange >= 1.0) fakeSteamScore++;
+          if (marketRange >= 1.5) fakeSteamScore++;
+          if (outlierCount <= 1) fakeSteamScore++;
+          if (outlierCount === 1 && marketRange >= 1.0) fakeSteamScore++;
+          if (outlierCount === 0 && marketRange >= 1.0) fakeSteamScore++;
+          fakeSteamTriggered = fakeSteamScore >= 3;
+        }
 
         const sideClassification = getNhlSignalType({
           league,
@@ -1509,8 +1524,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           totalBooksHeld: totalCoord?.heldBooks.map(b => b.book) ?? [],
           movePersistedSnapshots,
           hasSnappedBack,
-          fakeSteamTriggered: fakeSteamResult.isFakeSteam,
-          fakeSteamScore: fakeSteamResult.fakeSteamScore,
+          fakeSteamTriggered,
+          fakeSteamScore,
         });
 
         // Totals classification
