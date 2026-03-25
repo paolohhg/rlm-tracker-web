@@ -47,9 +47,9 @@ function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
 
 // ── Markets per league ────────────────────────────────────────
 function marketsForLeague(key: string, league: string): string {
-  // MLB preseason doesn't support alternate_runlines
-  if (league === "MLB" && key.includes("preseason")) return "spreads,h2h,totals";
-  if (league === "MLB") return "spreads,h2h,totals,alternate_runlines";
+  // Use only core markets (spreads, h2h, totals) for reliability.
+  // alternate_runlines is a premium market that can cause the entire
+  // request to fail if not available — fetch it separately if needed.
   if (league === "NHL") return "h2h,totals,spreads"; // puck line = spreads
   return "spreads,h2h,totals";
 }
@@ -120,18 +120,21 @@ serve(async () => {
     try {
       const res = await fetchWithRetry(url);
       apiCalls++;
-      games = await res.json() as Record<string, unknown>[];
-      if (!Array.isArray(games)) {
-        const errMsg = `[fetch-odds] ${league} (${key}): API returned non-array response`;
+      const body = await res.json();
+      if (!res.ok) {
+        const errMsg = `[fetch-odds] ${league} (${key}): HTTP ${res.status} — ${JSON.stringify(body).slice(0, 200)}`;
         console.error(errMsg);
         errors.push(errMsg);
         continue;
       }
-      // Log game count per sport key so we can see when MLB goes live
-      console.log(`[fetch-odds] ${league} (${key}): ${games.length} games returned`);
-      if (games.length === 0) {
-        console.log(`[fetch-odds] ${league} (${key}): 0 games — API may not have lines posted yet`);
+      games = body as Record<string, unknown>[];
+      if (!Array.isArray(games)) {
+        const errMsg = `[fetch-odds] ${league} (${key}): API returned non-array: ${JSON.stringify(body).slice(0, 200)}`;
+        console.error(errMsg);
+        errors.push(errMsg);
+        continue;
       }
+      console.log(`[fetch-odds] ${league} (${key}): ${games.length} games returned`);
     } catch (err: any) {
       const errMsg = `[fetch-odds] ${league} (${key}): Failed after retries — ${err.message}`;
       console.error(errMsg);
