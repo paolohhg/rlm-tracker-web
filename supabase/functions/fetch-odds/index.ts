@@ -58,6 +58,27 @@ function marketsForLeague(key: string, league: string): string {
   return "spreads,h2h,totals";
 }
 
+// ── Retry helper with exponential backoff ──────────────────────
+async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok || res.status < 500) return res; // Don't retry client errors
+      console.error(`[fetch-odds] HTTP ${res.status} on attempt ${attempt + 1} for ${url.split('?')[0]}`);
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err: any) {
+      console.error(`[fetch-odds] Network error on attempt ${attempt + 1}: ${err.message}`);
+      lastError = err;
+    }
+    if (attempt < maxRetries) {
+      const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError || new Error('fetchWithRetry failed');
+}
+
 serve(async () => {
   const ODDS_API_KEY = Deno.env.get("ODDS_API_KEY");
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -66,6 +87,7 @@ serve(async () => {
 
   const rows: Record<string, unknown>[] = [];
   const openerRows: Record<string, unknown>[] = [];
+  const errors: string[] = [];
   const now = new Date().toISOString();
   let apiCalls = 0;
 
@@ -96,11 +118,19 @@ serve(async () => {
 
     let games: Record<string, unknown>[];
     try {
-      const res = await fetch(url);
+      const res = await fetchWithRetry(url);
       apiCalls++;
       games = await res.json() as Record<string, unknown>[];
-      if (!Array.isArray(games)) continue;
-    } catch {
+      if (!Array.isArray(games)) {
+        const errMsg = `[fetch-odds] ${league} (${key}): API returned non-array response`;
+        console.error(errMsg);
+        errors.push(errMsg);
+        continue;
+      }
+    } catch (err: any) {
+      const errMsg = `[fetch-odds] ${league} (${key}): Failed after retries — ${err.message}`;
+      console.error(errMsg);
+      errors.push(errMsg);
       continue;
     }
 
@@ -244,7 +274,11 @@ serve(async () => {
   }
 
   if (!rows.length) {
-    return new Response(JSON.stringify({ error: "No rows collected", api_calls: apiCalls }), { status: 200 });
+    const msg = errors.length
+      ? `No rows collected. Errors: ${errors.join('; ')}`
+      : 'No rows collected (no games found across all leagues)';
+    console.error(`[fetch-odds] ${msg}`);
+    return new Response(JSON.stringify({ error: msg, api_calls: apiCalls, errors }), { status: errors.length ? 502 : 200 });
   }
 
   // Insert odds snapshots
@@ -290,5 +324,6 @@ serve(async () => {
       by_date: mlbByDate,
       sample: mlbGames.slice(0, 5).map(g => `${g.away} @ ${g.home} (${g.time}, ${g.books} books)`),
     },
+    ...(errors.length ? { partial_errors: errors } : {}),
   }), { status: 200 });
 });
