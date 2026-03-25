@@ -236,9 +236,13 @@ function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
     (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
   );
 
+  // Count distinct bookmakers reporting for this game
+  const distinctBooks = new Set(pool.map((o: any) => o.bookmaker)).size;
+
   return {
     current: byFetchedDesc[0] ?? null,
     opening: byFetchedAsc[0] ?? null,
+    distinctBooks,
   };
 }
 
@@ -424,7 +428,10 @@ export function useGamesFeed() {
       ] = await Promise.all([
         supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('game_time', { ascending: true }),
         supabase.from('rlm_alerts').select('*').gte('detected_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()).order('detected_at', { ascending: false }),
-        supabase.from('odds_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('fetched_at', { ascending: false }),
+        // Fetch odds for games from 4h ago through 7 days ahead.
+        // Use limit(3000) to ensure upcoming MLB/NHL games aren't crowded
+        // out by today's high-frequency NBA/NCAAB snapshots.
+        supabase.from('odds_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).lte('game_time', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()).order('fetched_at', { ascending: false }).limit(3000),
         supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
         supabase.from('splits_snapshots').select('*').order('fetched_at', { ascending: false }),
@@ -713,6 +720,8 @@ export function useGamesFeed() {
           moneylineHome: moneylineHome as number | null,
           moneylineAway: moneylineAway as number | null,
           mlMoveHome: mlMoveHome as number | null,
+
+          booksReporting: bestOdds.distinctBooks ?? null,
 
           isLocked: t.is_locked ?? false,
           lastUpdated:

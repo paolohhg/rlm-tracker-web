@@ -189,6 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const leagueFilter = req.query.league as string | undefined;
     const dateFilter = req.query.date as string | undefined;
+    const daysAhead = parseInt(req.query.days as string || '0', 10);
     const includeLive = req.query.include_live === 'true';
     const refreshOdds = req.query.refresh_odds === 'true';
 
@@ -218,6 +219,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (dateFilter) {
       slateStart = `${dateFilter}T00:00:00Z`;
       slateEnd = `${dateFilter}T23:59:59Z`;
+    } else if (daysAhead > 0) {
+      // Multi-day window: today through N days ahead
+      const todayStr = now.toISOString().split('T')[0];
+      slateStart = `${todayStr}T00:00:00Z`;
+      slateEnd = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
     } else {
       // Today: from now through end of day + 6h (covers late-night games)
       const todayStr = now.toISOString().split('T')[0];
