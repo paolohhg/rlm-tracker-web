@@ -890,31 +890,29 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
         </div>
       </div>
 
-      {/* Confidence */}
-      {(game.sideConfidence || game.totalConfidence) && (
-        <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-          {game.sideConfidence && (
-            <span style={{
-              fontSize: '10px', fontWeight: 700, fontFamily: T.font,
-              padding: '2px 8px', borderRadius: '4px',
-              backgroundColor: confidenceColor(game.sideConfidence).bg,
-              color: confidenceColor(game.sideConfidence).text,
-            }}>
-              Side: {game.sideConfidence}
-            </span>
-          )}
-          {game.totalConfidence && (
-            <span style={{
-              fontSize: '10px', fontWeight: 700, fontFamily: T.font,
-              padding: '2px 8px', borderRadius: '4px',
-              backgroundColor: confidenceColor(game.totalConfidence).bg,
-              color: confidenceColor(game.totalConfidence).text,
-            }}>
-              Total: {game.totalConfidence}
-            </span>
-          )}
-        </div>
-      )}
+      {/* Confidence — always visible on mobile */}
+      <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+        {game.sideConfidence ? (
+          <span style={{
+            fontSize: '10px', fontWeight: 700, fontFamily: T.font,
+            padding: '2px 8px', borderRadius: '4px',
+            backgroundColor: confidenceColor(game.sideConfidence).bg,
+            color: confidenceColor(game.sideConfidence).text,
+          }}>
+            S: {game.sideConfidence}
+          </span>
+        ) : null}
+        {game.totalConfidence ? (
+          <span style={{
+            fontSize: '10px', fontWeight: 700, fontFamily: T.font,
+            padding: '2px 8px', borderRadius: '4px',
+            backgroundColor: confidenceColor(game.totalConfidence).bg,
+            color: confidenceColor(game.totalConfidence).text,
+          }}>
+            T: {game.totalConfidence}
+          </span>
+        ) : null}
+      </div>
 
       {/* Badges */}
       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
@@ -1208,7 +1206,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={refresh} />}
+      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={() => {}} />}
       {/* logCycleGame modal removed — HM Cycles hidden for now */}
       {shareStudioGame && <ShareStudio game={shareStudioGame} onClose={() => setShareStudioGame(null)} />}
     </div>
