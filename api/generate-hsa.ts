@@ -249,6 +249,25 @@ function classifyOddsRow(
   return results;
 }
 
+/** Compute a deterministic snapshot ID from the odds data.
+ * Same set of per-book lines → same snapshot_id → same analysis. */
+function computeSnapshotId(snapshots: OddsSnapshot[], league: string, homeTeam: string, awayTeam: string): string {
+  // Hash the per-book current lines: book|spread|total|mlHome|mlAway
+  // Sort by book name for determinism
+  const lines = [...snapshots]
+    .sort((a, b) => a.bookmaker.localeCompare(b.bookmaker))
+    .map(s => `${s.bookmaker}|${s.spread}|${s.total}|${s.moneyline_home}|${s.moneyline_away}`)
+    .join(';');
+  // Simple hash — not crypto, just deterministic fingerprint
+  let hash = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const chr = lines.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return `${league}|${homeTeam}|${awayTeam}|${Math.abs(hash).toString(36)}`;
+}
+
 function canonicalMarketKey(row: NormalizedOddsRow): string {
   return `${row.eventId}|${row.book}|${row.marketType}|${row.period}|${row.betType}`;
 }
@@ -1106,7 +1125,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { league, home_team, away_team, game_time, force } = req.body || {};
+  const { league, home_team, away_team, game_time, force, mode: refreshMode } = req.body || {};
+  // mode: 'rerender' = same snapshot, same confidence. 'refresh' = latest odds, new analysis.
+  // force=true without mode defaults to 'refresh' for backward compat.
+  const analysisMode: 'cache' | 'rerender' | 'refresh' = refreshMode === 'rerender' ? 'rerender'
+    : (force || refreshMode === 'refresh') ? 'refresh' : 'cache';
 
   if (!league || !home_team || !away_team || !game_time) {
     return res.status(400).json({
@@ -1115,66 +1138,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Check cache: return existing analysis if < 2h old
+    // ── Snapshot-pinned analysis: three modes ──────────────────────
+    // cache:    return existing if <30 min old and lines haven't moved
+    // rerender: return existing analysis for SAME snapshot (deterministic)
+    // refresh:  generate new analysis from latest odds (may change confidence)
+
+    const gameId = `${league}|${home_team}|${away_team}`;
+
+    // Fetch the latest analysis for this game
     const { data: existing } = await supabase
       .from('claude_analyses')
       .select('*')
-      .eq('league', league)
-      .eq('home_team', home_team)
-      .eq('away_team', away_team)
+      .eq('game_id', gameId)
       .order('created_at', { ascending: false })
       .limit(1);
 
-    // Cache check: return existing analysis only if:
-    //   1. Less than 30 min old (was 2h — too stale for moving markets)
-    //   2. Not force-refreshed
-    //   3. Current odds haven't moved meaningfully since cached analysis
-    if (existing?.length && !force) {
+    // MODE: rerender — return the exact same analysis (same snapshot, same confidence)
+    // This is what "Refresh Analysis" should do — NO new generation, NO new odds fetch
+    if (analysisMode === 'rerender' && existing?.length && existing[0].analysis) {
+      return res.status(200).json({
+        narrative: existing[0].analysis,
+        cached: true,
+        rerender: true,
+        snapshot_id: existing[0].snapshot_id ?? null,
+        confidence: existing[0].confidence_label ?? 'Low',
+        status_tag: existing[0].status_tag ?? 'WATCH',
+        market_lean: existing[0].market_lean ?? 'PASS',
+        created_at: existing[0].created_at,
+      });
+    }
+
+    // MODE: cache — return existing if fresh enough
+    if (analysisMode === 'cache' && existing?.length && existing[0].analysis) {
       const age = Date.now() - new Date(existing[0].created_at).getTime();
       const thirtyMin = 30 * 60 * 1000;
-      if (age < thirtyMin && existing[0].analysis) {
-        // Quick-check: has the line moved since this analysis was cached?
-        // Fetch the latest snapshot to compare
-        const { data: latestSnap } = await supabase
-          .from('odds_snapshots')
-          .select('spread, total')
-          .eq('league', league)
-          .eq('home_team', home_team)
-          .eq('away_team', away_team)
-          .order('fetched_at', { ascending: false })
-          .limit(1);
-
-        let lineMovedSignificantly = false;
-        if (latestSnap?.length && existing[0].analysis) {
-          const text = existing[0].analysis as string;
-          // Extract the consensus total/spread from cached text
-          const totalMatch = text.match(/total.*?(\d{2,3}(?:\.\d)?)/i);
-          const cachedTotal = totalMatch ? parseFloat(totalMatch[1]) : null;
-          const currentTotal = latestSnap[0].total;
-          if (cachedTotal && currentTotal && Math.abs(currentTotal - cachedTotal) >= 1.0) {
-            lineMovedSignificantly = true;
-          }
-          const currentSpread = latestSnap[0].spread;
-          // Check spread movement by looking at what the analysis mentions
-          if (currentSpread != null) {
-            const spreadMatch = text.match(/consensus.*?(-?\d+(?:\.\d)?)/i);
-            const cachedSpread = spreadMatch ? parseFloat(spreadMatch[1]) : null;
-            if (cachedSpread != null && Math.abs(currentSpread - cachedSpread) >= 1.0) {
-              lineMovedSignificantly = true;
-            }
-          }
-        }
-
-        if (!lineMovedSignificantly) {
-          return res.status(200).json({
-            narrative: existing[0].analysis,
-            cached: true,
-            created_at: existing[0].created_at,
-          });
-        }
-        // Line moved — fall through to regenerate
+      if (age < thirtyMin) {
+        return res.status(200).json({
+          narrative: existing[0].analysis,
+          cached: true,
+          snapshot_id: existing[0].snapshot_id ?? null,
+          confidence: existing[0].confidence_label ?? 'Low',
+          status_tag: existing[0].status_tag ?? 'WATCH',
+          market_lean: existing[0].market_lean ?? 'PASS',
+          created_at: existing[0].created_at,
+        });
       }
     }
+
+    // MODE: refresh (or cache miss) — generate new analysis from current odds
+    // Fall through to the full generation pipeline below
 
     // Note: removed force-refresh odds fetch. The cron runs every 10 min
     // so data is always fresh. Fetching here was causing the dashboard to
@@ -1321,6 +1333,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Preprocess clean odds into structured summary
     const summary = summarizeOdds(cleanSnapshots, game_time, league);
+
+    // Compute deterministic snapshot ID from current book lines
+    // Same set of per-book lines → same ID → deterministic analysis
+    const snapshotId = computeSnapshotId(cleanSnapshots, league, home_team, away_team);
+    const snapshotTime = new Date().toISOString();
+
+    // Check if we already have an analysis for this exact snapshot
+    if (analysisMode !== 'refresh') {
+      const { data: existingForSnapshot } = await supabase
+        .from('claude_analyses')
+        .select('*')
+        .eq('game_id', gameId)
+        .eq('snapshot_id', snapshotId)
+        .limit(1);
+
+      if (existingForSnapshot?.length && existingForSnapshot[0].analysis) {
+        console.log(`[HSA] Returning existing analysis for snapshot ${snapshotId}`);
+        return res.status(200).json({
+          narrative: existingForSnapshot[0].analysis,
+          cached: true,
+          snapshot_id: snapshotId,
+          confidence: existingForSnapshot[0].confidence_label ?? 'Low',
+          status_tag: existingForSnapshot[0].status_tag ?? 'WATCH',
+          market_lean: existingForSnapshot[0].market_lean ?? 'PASS',
+          created_at: existingForSnapshot[0].created_at,
+        });
+      }
+    }
 
     // Fetch betting splits from splits_snapshots table
     let splitsData: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null = null;
@@ -1872,13 +1912,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Store in claude_analyses
+    // Store in claude_analyses with snapshot metadata
+    // The trigger set_latest_analysis() marks previous rows as is_latest=false
     const { error: insertError } = await supabase.from('claude_analyses').insert({
       league,
       home_team,
       away_team,
-      game_id: `${league}|${home_team}|${away_team}`,
+      game_id: gameId,
       analysis: narrative,
+      snapshot_id: snapshotId,
+      snapshot_time: snapshotTime,
+      confidence_label: confidence,
+      status_tag: statusTag,
+      market_lean: marketLean,
+      signal_summary: mlbTruth
+        ? { side: mlbTruth.signal_summary.side_signal, total: mlbTruth.signal_summary.total_signal }
+        : lifecycle.spread?.final_read
+          ? { spread: lifecycle.spread.final_read, total: lifecycle.total?.final_read ?? null }
+          : null,
+      is_latest: true,
     });
 
     if (insertError) {
@@ -1942,6 +1994,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       narrative,
       cached: false,
+      snapshot_id: snapshotId,
+      snapshot_time: snapshotTime,
       snapshot_count: summary.snapshotCount,
       tracking_hours: summary.trackingHours,
       status_tag: statusTag,
