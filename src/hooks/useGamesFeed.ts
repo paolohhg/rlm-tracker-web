@@ -483,8 +483,8 @@ export function useGamesFeed() {
 
   const fetchGames = useCallback(async () => {
     try {
-      // Fire-and-forget: refresh splits from Action Network on each load
-      fetch('/api/fetch-splits').catch(() => {});
+      // Note: splits refresh removed — handled by Vercel cron every 30 min.
+      // Calling it here caused unnecessary API calls and potential data churn.
 
       const [
         tipoffRes,
@@ -821,10 +821,15 @@ export function useGamesFeed() {
         };
       });
 
-      setGames(gameViews);
+      // Only update if we got real data — prevents flashing empty dashboard
+      // when a query partially fails or returns fewer rows temporarily
+      if (gameViews.length > 0) {
+        setGames(gameViews);
+      }
       setLastUpdated(new Date());
     } catch (err) {
       console.error('Feed error:', err);
+      // Keep existing games on error — don't flash empty
     } finally {
       setLoading(false);
     }
