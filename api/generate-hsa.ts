@@ -1706,8 +1706,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let mlbTruth: import('./lib/mlb-truth-layer/types').MlbTruthObject | null = null;
     if (league === 'MLB') {
       try {
-        const { buildMlbTruth, buildMlbHsaInput, buildBlockedOutput } = await import('./lib/mlb-truth-layer');
-        mlbTruth = buildMlbTruth(
+        const { buildMLBTruthObject, buildMLBHSAInput, buildBlockedOutput } = await import('./lib/mlb-truth-layer');
+        mlbTruth = buildMLBTruthObject(
           cleanSnapshots as any,
           home_team, away_team, game_time,
           undefined, // pitchers — TODO: fetch from ESPN
@@ -1733,7 +1733,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
         }
 
-        mlbTruthBlock = buildMlbHsaInput(mlbTruth);
+        mlbTruthBlock = buildMLBHSAInput(mlbTruth);
         console.log(`[HSA MLB] Truth: regime=${mlbTruth.derived_truth.market_regime}, side=${mlbTruth.signal_summary.side.type}(${mlbTruth.signal_summary.side.confidence}), total=${mlbTruth.signal_summary.total.type}(${mlbTruth.signal_summary.total.confidence})`);
       } catch (err: any) {
         console.error('[HSA MLB] Truth layer failed (non-fatal):', err.message);
@@ -1858,8 +1858,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let mlbVerification: any = undefined;
     if (mlbTruth && league === 'MLB') {
       try {
-        const { verifyMlbHsa } = await import('./lib/mlb-truth-layer');
-        const verification = verifyMlbHsa(narrative, mlbTruth);
+        const { verifyGeneratedMLBHSA } = await import('./lib/mlb-truth-layer');
+        const verification = verifyGeneratedMLBHSA(narrative, mlbTruth);
         mlbVerification = verification;
         if (!verification.passed) {
           console.error(`[HSA MLB VERIFY] VIOLATIONS:`, verification.violations);

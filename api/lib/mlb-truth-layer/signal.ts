@@ -1,195 +1,244 @@
 // ══════════════════════════════════════════════════════════════════════════════
 //  MLB Truth Layer — Signal Derivation
 //
-//  Derives side and total signals from the validated truth object.
-//  Separate logic for each — side is ML-primary, total is number-primary.
+//  MLB-specific signal logic. Does NOT reuse generic NBA/NCAAB spread logic.
+//  Separate side and total derivation with MLB signal tags.
 // ══════════════════════════════════════════════════════════════════════════════
 
 import type {
   MlbTruthObject,
   MlbSignalSummary,
-  MlbSideSignal,
-  MlbTotalSignal,
-  MlbSignalType,
+  MlbSideSignalTag,
+  MlbTotalSignalTag,
   MlbConfidence,
 } from './types';
 
 // ── Thresholds ───────────────────────────────────────────────────────────────
 
-const ML_THRESHOLDS = {
-  NOTABLE: 5,       // 5 cents
-  MEANINGFUL: 10,   // 10 cents
-  SIGNIFICANT: 15,  // 15 cents
-  STEAM: 20,        // 20 cents
-};
+const ML = { NOTABLE: 5, MEANINGFUL: 10, SIGNIFICANT: 15, STEAM: 20 };
+const TOT = { MEANINGFUL: 0.5, SIGNIFICANT: 1.0, STEAM: 1.5 };
+const JUICE = { NOTABLE: 5, MEANINGFUL: 10, SIGNIFICANT: 15 };
 
-const TOTAL_THRESHOLDS = {
-  MEANINGFUL: 0.5,
-  SIGNIFICANT: 1.0,
-  STEAM: 1.5,
-};
+// ── Side Signal ──────────────────────────────────────────────────────────────
 
-// ── Side Signal (ML-primary) ─────────────────────────────────────────────────
+function deriveSideSignal(truth: MlbTruthObject): {
+  signal: MlbSideSignalTag;
+  confidence: MlbConfidence;
+  reason: string;
+} {
+  const ml = truth.market_state.moneyline;
+  const rl = truth.market_state.run_line;
+  const pub = truth.public_data;
 
-function deriveSideSignal(truth: MlbTruthObject): MlbSideSignal {
-  const factors: string[] = [];
-  const mlHomeDelta = Math.abs(truth.moneyline.home.delta);
-  const mlAwayDelta = Math.abs(truth.moneyline.away.delta);
-  const mlDelta = Math.max(mlHomeDelta, mlAwayDelta);
+  const homeDelta = Math.abs(ml.home_delta);
+  const awayDelta = Math.abs(ml.away_delta);
+  const mlDelta = Math.max(homeDelta, awayDelta);
 
-  // If ML barely moved, check RL juice movement as secondary
-  if (mlDelta < ML_THRESHOLDS.NOTABLE) {
-    const rlPriceDelta = Math.abs(truth.run_line.favorite_price_delta);
-    if (rlPriceDelta >= 10) {
-      factors.push(`Run line juice moved ${rlPriceDelta} cents on ${truth.run_line.favorite_team}`);
+  // ── Check for stale/conflicted state first ──────────────────────
+  if (ml.consensus_side === 'mixed') {
+    return { signal: 'MLB_SPLIT_MARKET', confidence: 'low', reason: 'Moneyline consensus is mixed — no clear favorite' };
+  }
+
+  if (ml.books_reporting > 0 && ml.books_reporting < 2) {
+    return { signal: 'MLB_STALE_OR_CONFLICTED', confidence: 'low', reason: `Only ${ml.books_reporting} book reporting — insufficient for signal` };
+  }
+
+  // ── No meaningful ML movement ───────────────────────────────────
+  if (mlDelta < ML.NOTABLE) {
+    // Check RL juice as secondary
+    if (rl.price_changed && Math.abs(rl.favorite_price_delta) >= JUICE.MEANINGFUL) {
       return {
-        type: 'PASS',
-        confidence: 'Low',
-        direction: '',
-        primary_market: 'runline',
-        factors: [...factors, 'ML stable — RL juice movement only, insufficient for signal'],
+        signal: 'MLB_RL_FAVORITE_PRICE_SUPPORT',
+        confidence: 'low',
+        reason: `ML stable, but RL juice moved ${rl.favorite_price_delta}c on ${rl.favored_team} -1.5`,
       };
     }
-
-    return {
-      type: 'PASS',
-      confidence: 'Low',
-      direction: '',
-      primary_market: 'moneyline',
-      factors: ['No meaningful moneyline or run line movement'],
-    };
+    return { signal: 'MLB_SIDE_PASS', confidence: 'low', reason: 'No meaningful moneyline or run line movement' };
   }
 
-  // ML moved — determine direction
-  const favTeam = truth.derived_truth.favorite_team;
-  const dogTeam = truth.derived_truth.underdog_team;
-  const mlFavDelta = truth.moneyline.consensus_favorite === 'home'
-    ? truth.moneyline.home.delta : truth.moneyline.away.delta;
-  const direction = mlFavDelta < 0
-    ? `toward ${favTeam} (favorite strengthening)`
-    : `toward ${dogTeam} (underdog shortening)`;
+  // ── ML moved — determine direction and classify ─────────────────
+  const favIsHome = ml.consensus_side === 'home';
+  const favDelta = favIsHome ? ml.home_delta : ml.away_delta;
+  const favStrengthening = favDelta < 0; // more negative = stronger favorite
+  const dogBuyback = !favStrengthening; // positive delta on fav = weakening = dog shortening
 
-  // Check public alignment for RLM detection
-  const pub = truth.public_data;
-  let isRLM = false;
+  // Public alignment for RLM detection
+  let publicOnFav = false;
+  let publicPct = 0;
   if (pub.home_ticket_pct != null) {
-    const publicOnFav = (truth.moneyline.consensus_favorite === 'home' && pub.home_ticket_pct > 50)
-      || (truth.moneyline.consensus_favorite === 'away' && (pub.away_ticket_pct ?? (100 - pub.home_ticket_pct)) > 50);
-
-    // Line moved AGAINST public = RLM
-    const lineTowardDog = mlFavDelta > 0; // positive delta on favorite = weakening = toward dog
-    if (publicOnFav && lineTowardDog) {
-      isRLM = true;
-      factors.push(`Reverse line movement: public on ${favTeam}, ML moved toward ${dogTeam}`);
-    } else if (!publicOnFav && !lineTowardDog) {
-      isRLM = true;
-      factors.push(`Reverse line movement: public on ${dogTeam}, ML moved toward ${favTeam}`);
-    }
+    publicOnFav = favIsHome ? pub.home_ticket_pct > 50 : (pub.away_ticket_pct ?? (100 - pub.home_ticket_pct)) > 50;
+    publicPct = publicOnFav
+      ? (favIsHome ? pub.home_ticket_pct : (pub.away_ticket_pct ?? (100 - pub.home_ticket_pct)))
+      : (favIsHome ? (pub.away_ticket_pct ?? (100 - pub.home_ticket_pct)) : pub.home_ticket_pct);
   }
 
-  // Book participation
-  const booksReporting = truth.moneyline.home.books_reporting;
-  const booksAligned = truth.moneyline.home.books.filter(b => {
-    const openBook = truth.moneyline.home.books.find(ob => ob.book === b.book);
-    return openBook && Math.abs(b.value - truth.moneyline.home.open) >= ML_THRESHOLDS.NOTABLE;
-  }).length;
-
-  factors.push(`ML moved ${mlDelta}c across ${booksReporting} books`);
+  // Is this reverse line movement?
+  const isRLM = pub.home_ticket_pct != null && (
+    (publicOnFav && dogBuyback) || (!publicOnFav && favStrengthening)
+  );
 
   // Classify signal type
-  let type: MlbSignalType;
+  let signal: MlbSideSignalTag;
   let confidence: MlbConfidence;
+  let reason: string;
 
-  if (mlDelta >= ML_THRESHOLDS.STEAM && booksAligned >= 4) {
-    type = isRLM ? 'REVERSE_LINE_MOVEMENT' : 'FULL_BOOK_CONSENSUS';
-    confidence = 'High';
-    factors.push(`${booksAligned}/${booksReporting} books moved ≥${ML_THRESHOLDS.STEAM}c — ${type}`);
-  } else if (mlDelta >= ML_THRESHOLDS.SIGNIFICANT) {
-    type = isRLM ? 'REVERSE_LINE_MOVEMENT' : 'MARKET_AGREEMENT';
-    confidence = 'Elevated';
-    factors.push(`Significant ML movement (${mlDelta}c)`);
-  } else if (mlDelta >= ML_THRESHOLDS.MEANINGFUL) {
-    type = isRLM ? 'REVERSE_LINE_MOVEMENT' : 'MARKET_AGREEMENT';
-    confidence = 'Moderate';
-    factors.push(`Meaningful ML movement (${mlDelta}c)`);
+  if (favStrengthening) {
+    signal = 'MLB_ML_FAVORITE_STRENGTHENING';
+    reason = `${truth.derived_truth.favorite_team} ML strengthened by ${mlDelta}c`;
   } else {
-    type = 'PASS';
-    confidence = 'Low';
-    factors.push(`Notable but sub-threshold ML movement (${mlDelta}c)`);
+    signal = 'MLB_DOG_BUYBACK';
+    reason = `${truth.derived_truth.underdog_team} ML shortened by ${mlDelta}c (dog buyback)`;
   }
 
-  // Pitcher confidence modifier
-  if (!truth.starting_pitchers.confirmed && confidence !== 'Low') {
-    factors.push('Pitchers unconfirmed — movement may reverse at confirmation');
+  if (isRLM) {
+    reason += ` — reverse line movement (${publicPct}% public on opposite side)`;
   }
 
-  return { type, confidence, direction, primary_market: 'moneyline', factors };
+  // Confidence based on magnitude
+  if (mlDelta >= ML.STEAM) {
+    confidence = 'high';
+    reason += ` [STEAM: ${mlDelta}c across ${ml.books_reporting} books]`;
+  } else if (mlDelta >= ML.SIGNIFICANT) {
+    confidence = 'high';
+  } else if (mlDelta >= ML.MEANINGFUL) {
+    confidence = 'moderate';
+  } else {
+    confidence = 'low';
+  }
+
+  // Confidence reductions
+  if (!truth.starting_pitchers.confirmed && confidence !== 'low') {
+    reason += ' (pitchers unconfirmed — confidence reduced)';
+    if (confidence === 'high') confidence = 'moderate';
+    else confidence = 'low';
+  }
+  if (ml.books_reporting < 3 && confidence !== 'low') {
+    reason += ` (only ${ml.books_reporting} books — confidence reduced)`;
+    if (confidence === 'high') confidence = 'moderate';
+    else confidence = 'low';
+  }
+  if (truth.validation.warnings.length > 2 && confidence === 'high') {
+    confidence = 'moderate';
+    reason += ' (multiple warnings — confidence capped)';
+  }
+
+  return { signal, confidence, reason };
 }
 
 // ── Total Signal ─────────────────────────────────────────────────────────────
 
-function deriveTotalSignal(truth: MlbTruthObject): MlbTotalSignal {
-  const factors: string[] = [];
-  const numDelta = Math.abs(truth.total.number_delta);
-  const juiceDelta = Math.abs(truth.total.over_price_delta);
+function deriveTotalSignal(truth: MlbTruthObject): {
+  signal: MlbTotalSignalTag;
+  confidence: MlbConfidence;
+  reason: string;
+} {
+  const tot = truth.market_state.total;
+  const numDelta = Math.abs(tot.number_delta);
+  const overJuiceDelta = Math.abs(tot.over_price_delta);
+  const underJuiceDelta = Math.abs(tot.under_price_delta);
+  const maxJuice = Math.max(overJuiceDelta, underJuiceDelta);
 
-  if (numDelta < TOTAL_THRESHOLDS.MEANINGFUL && juiceDelta < 10) {
-    return {
-      type: 'PASS',
-      confidence: 'Low',
-      direction: truth.total.direction,
-      factors: ['No meaningful total movement (number or juice)'],
-    };
+  // ── Book disagreement check ─────────────────────────────────────
+  if (tot.per_book.length >= 3) {
+    const values = tot.per_book.map(b => b.value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (max - min >= 1.5) {
+      return {
+        signal: 'MLB_TOTAL_DISAGREEMENT',
+        confidence: 'low',
+        reason: `Total disagreement: ${min} to ${max} across ${tot.books_reporting} books`,
+      };
+    }
   }
 
-  const direction = truth.total.direction;
-  factors.push(`Total ${direction === 'over' ? 'rose' : direction === 'under' ? 'dropped' : 'stable'}: ${truth.total.open} → ${truth.total.current}`);
+  // ── Number didn't move ──────────────────────────────────────────
+  if (!tot.number_moved) {
+    // Check juice-only movement
+    if (tot.juice_shift_only && maxJuice >= JUICE.MEANINGFUL) {
+      const juiceDir = tot.over_price_delta < 0 ? 'over' : 'under';
+      const signal: MlbTotalSignalTag = juiceDir === 'over'
+        ? 'MLB_TOTAL_JUICE_PRESSURE_OVER' : 'MLB_TOTAL_JUICE_PRESSURE_UNDER';
+      return {
+        signal,
+        confidence: 'low',
+        reason: `Total number flat, but juice shifted ${maxJuice}c toward ${juiceDir}`,
+      };
+    }
 
-  if (juiceDelta >= 10) {
-    factors.push(`Over juice moved ${juiceDelta} cents`);
+    // True frozen
+    if (truth.tracking_hours >= 2 && tot.books_reporting >= 3) {
+      return {
+        signal: 'MLB_TOTAL_FROZEN',
+        confidence: 'low',
+        reason: `Total frozen at ${tot.current} across ${tot.books_reporting} books for ${truth.tracking_hours}h`,
+      };
+    }
+
+    return { signal: 'PASS', confidence: 'low', reason: 'No total movement (number or juice)' };
   }
 
-  let type: MlbSignalType;
+  // ── Number moved — classify ─────────────────────────────────────
+  const dirUp = tot.direction === 'up';
+  let signal: MlbTotalSignalTag;
   let confidence: MlbConfidence;
+  let reason: string;
 
-  if (numDelta >= TOTAL_THRESHOLDS.STEAM) {
-    type = 'STEAM_MOVE';
-    confidence = 'High';
-    factors.push(`Total moved ${numDelta} pts — steam-level`);
-  } else if (numDelta >= TOTAL_THRESHOLDS.SIGNIFICANT) {
-    type = 'MARKET_AGREEMENT';
-    confidence = 'Elevated';
-  } else if (numDelta >= TOTAL_THRESHOLDS.MEANINGFUL) {
-    type = 'MARKET_AGREEMENT';
-    confidence = 'Moderate';
-  } else if (juiceDelta >= 15) {
-    type = 'MARKET_AGREEMENT';
-    confidence = 'Low';
-    factors.push('Juice movement only — no number change');
+  if (numDelta >= TOT.STEAM) {
+    signal = dirUp ? 'MLB_TOTAL_OVER_STEAM' : 'MLB_TOTAL_UNDER_STEAM';
+    confidence = 'high';
+    reason = `Total ${dirUp ? 'rose' : 'dropped'} ${numDelta} pts (${tot.open} → ${tot.current}) — steam level`;
+  } else if (numDelta >= TOT.SIGNIFICANT) {
+    signal = dirUp ? 'MLB_TOTAL_OVER_STEAM' : 'MLB_TOTAL_UNDER_STEAM';
+    confidence = 'moderate';
+    reason = `Total ${dirUp ? 'rose' : 'dropped'} ${numDelta} pts`;
   } else {
-    type = 'PASS';
-    confidence = 'Low';
+    signal = 'WATCH';
+    confidence = 'low';
+    reason = `Total moved ${numDelta} pts (developing)`;
   }
 
-  return { type, confidence, direction, factors };
+  // Pitcher confidence modifier
+  if (!truth.starting_pitchers.confirmed && confidence !== 'low') {
+    reason += ' (pitchers unconfirmed)';
+    if (confidence === 'high') confidence = 'moderate';
+  }
+
+  if (tot.direction === 'mixed') {
+    signal = 'MLB_TOTAL_DISAGREEMENT';
+    confidence = 'low';
+    reason = 'Total direction mixed across books';
+  }
+
+  return { signal, confidence, reason };
 }
 
 // ── Main Entry Point ─────────────────────────────────────────────────────────
 
-export function deriveMlbSignals(truth: MlbTruthObject): MlbSignalSummary {
+export function deriveMLBSignals(truth: MlbTruthObject): MlbSignalSummary {
   const side = deriveSideSignal(truth);
   const total = deriveTotalSignal(truth);
 
-  // Overall status: highest of side and total
-  const statusOrder: Record<string, number> = { PASS: 0, WATCH: 1, ACTIVE: 2 };
-  const sideStatus = side.type === 'PASS' ? 'PASS'
-    : side.confidence === 'Low' ? 'WATCH' : (side.confidence === 'Moderate' ? 'WATCH' : 'ACTIVE');
-  const totalStatus = total.type === 'PASS' ? 'PASS'
-    : total.confidence === 'Low' ? 'WATCH' : (total.confidence === 'Moderate' ? 'WATCH' : 'ACTIVE');
+  // Overall confidence = highest of side and total
+  const confOrder: Record<MlbConfidence, number> = { low: 0, moderate: 1, high: 2 };
+  const overallConf = confOrder[side.confidence] >= confOrder[total.confidence]
+    ? side.confidence : total.confidence;
 
-  const status = (statusOrder[sideStatus] ?? 0) >= (statusOrder[totalStatus] ?? 0)
-    ? sideStatus as 'PASS' | 'WATCH' | 'ACTIVE'
-    : totalStatus as 'PASS' | 'WATCH' | 'ACTIVE';
+  // Status: PASS if both pass, ACTIVE if high confidence, WATCH otherwise
+  const isPass = side.signal === 'PASS' || side.signal === 'MLB_SIDE_PASS';
+  const totalIsPass = total.signal === 'PASS';
 
-  return { side, total, status };
+  let status: 'PASS' | 'WATCH' | 'ACTIVE' = 'PASS';
+  if (!isPass || !totalIsPass) {
+    status = overallConf === 'high' ? 'ACTIVE' : 'WATCH';
+  }
+
+  return {
+    side_signal: side.signal,
+    total_signal: total.signal,
+    confidence: overallConf,
+    side_reason: side.reason,
+    total_reason: total.reason,
+    status,
+  };
 }

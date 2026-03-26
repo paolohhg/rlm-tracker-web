@@ -2,25 +2,22 @@
 //  MLB Truth Layer — Normalization
 //
 //  Converts raw odds_snapshots into the canonical MlbTruthObject.
-//  All downstream consumers (HSA writer, signal engine, dashboard)
-//  must use this normalized form — never raw snapshots.
+//  All downstream consumers must use this normalized form — never raw snapshots.
 // ══════════════════════════════════════════════════════════════════════════════
 
 import type {
   RawOddsSnapshot,
   MlbTruthObject,
-  MlbMoneyline,
-  MlbRunLine,
-  MlbTotal,
+  MoneylineTruth,
+  RunLineTruth,
+  TotalTruth,
+  DerivedTruth,
   MlbBookLine,
-  MlbMarketSide,
-  MlbDerivedTruth,
-  MlbStartingPitchers,
+  PitcherInfo,
 } from './types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** MODE consensus — most common value, never averaged */
 function mode(nums: number[]): number {
   if (nums.length === 0) return 0;
   if (nums.length === 1) return nums[0];
@@ -46,17 +43,21 @@ function displayBook(raw: string): string {
   return BOOK_DISPLAY[raw.toLowerCase()] || raw;
 }
 
+function nonZero(v: number | null | undefined): v is number {
+  return v != null && v !== 0;
+}
+
 // ── Main Normalizer ──────────────────────────────────────────────────────────
 
-export function normalizeMlbMarket(
+export function normalizeMLBMarket(
   snapshots: RawOddsSnapshot[],
   homeTeam: string,
   awayTeam: string,
   gameTime: string,
-  pitchers?: MlbStartingPitchers,
+  pitchers?: PitcherInfo,
 ): MlbTruthObject {
   if (!snapshots.length) {
-    return emptyTruthObject(homeTeam, awayTeam, gameTime, pitchers);
+    return emptyTruth(homeTeam, awayTeam, gameTime, pitchers);
   }
 
   const sorted = [...snapshots].sort(
@@ -69,7 +70,7 @@ export function normalizeMlbMarket(
     (new Date(lastTime).getTime() - new Date(firstTime).getTime()) / 3600000 * 10
   ) / 10;
 
-  // Build per-book opening and current snapshots
+  // Per-book opening (first seen) and current (last seen) snapshots
   const openByBook: Record<string, RawOddsSnapshot> = {};
   const currByBook: Record<string, RawOddsSnapshot> = {};
   for (const s of sorted) {
@@ -77,87 +78,186 @@ export function normalizeMlbMarket(
     currByBook[s.bookmaker] = s;
   }
 
-  // ── Moneyline ────────────────────────────────────────────────
-  const mlHome = buildMarketSide(openByBook, currByBook, s => s.moneyline_home, null);
-  const mlAway = buildMarketSide(openByBook, currByBook, s => s.moneyline_away, null);
+  // ── Moneyline ────────────────────────────────────────────────────
+  const homeOpens = Object.values(openByBook).filter(s => nonZero(s.moneyline_home)).map(s => s.moneyline_home);
+  const homeCurrs = Object.values(currByBook).filter(s => nonZero(s.moneyline_home)).map(s => s.moneyline_home);
+  const awayOpens = Object.values(openByBook).filter(s => nonZero(s.moneyline_away)).map(s => s.moneyline_away);
+  const awayCurrs = Object.values(currByBook).filter(s => nonZero(s.moneyline_away)).map(s => s.moneyline_away);
 
-  const consensusFav: 'home' | 'away' =
-    mlHome.current !== 0 && mlAway.current !== 0
-      ? (mlHome.current < mlAway.current ? 'home' : 'away')  // more negative = favorite
-      : (mlHome.current < 0 ? 'home' : 'away');
+  const homeOpen = homeOpens.length ? mode(homeOpens) : null;
+  const homeCurr = homeCurrs.length ? mode(homeCurrs) : null;
+  const awayOpen = awayOpens.length ? mode(awayOpens) : null;
+  const awayCurr = awayCurrs.length ? mode(awayCurrs) : null;
 
-  const moneyline: MlbMoneyline = {
-    home: mlHome,
-    away: mlAway,
-    consensus_favorite: consensusFav,
-    consensus_favorite_ml: consensusFav === 'home' ? mlHome.current : mlAway.current,
-    consensus_underdog_ml: consensusFav === 'home' ? mlAway.current : mlHome.current,
+  // Consensus: which side is favorite?
+  let consensusSide: 'home' | 'away' | 'mixed' | null = null;
+  if (homeCurr != null && awayCurr != null) {
+    if (homeCurr < 0 && awayCurr > 0) consensusSide = 'home';
+    else if (awayCurr < 0 && homeCurr > 0) consensusSide = 'away';
+    else if (homeCurr < 0 && awayCurr < 0) {
+      // Both negative — the more negative is the favorite
+      consensusSide = homeCurr < awayCurr ? 'home' : 'away';
+    } else {
+      consensusSide = 'mixed';
+    }
+  }
+
+  const perBookHome: MlbBookLine[] = Object.entries(currByBook)
+    .filter(([, s]) => nonZero(s.moneyline_home))
+    .map(([b, s]) => ({ book: displayBook(b), value: s.moneyline_home, price: null, timestamp: s.fetched_at }));
+  const perBookAway: MlbBookLine[] = Object.entries(currByBook)
+    .filter(([, s]) => nonZero(s.moneyline_away))
+    .map(([b, s]) => ({ book: displayBook(b), value: s.moneyline_away, price: null, timestamp: s.fetched_at }));
+
+  const moneyline: MoneylineTruth = {
+    home_open: homeOpen,
+    home_current: homeCurr,
+    away_open: awayOpen,
+    away_current: awayCurr,
+    home_delta: (homeOpen != null && homeCurr != null) ? homeCurr - homeOpen : 0,
+    away_delta: (awayOpen != null && awayCurr != null) ? awayCurr - awayOpen : 0,
+    books_reporting: perBookHome.length,
+    consensus_side: consensusSide,
+    per_book_home: perBookHome,
+    per_book_away: perBookAway,
   };
 
-  // ── Run Line ─────────────────────────────────────────────────
-  // Canonical: favorite is ALWAYS -1.5, underdog is ALWAYS +1.5
-  const favoriteTeam = consensusFav === 'home' ? homeTeam : awayTeam;
-  const underdogTeam = consensusFav === 'home' ? awayTeam : homeTeam;
+  // ── Run Line ─────────────────────────────────────────────────────
+  // Canonical: favorite ALWAYS -1.5, underdog ALWAYS +1.5.
+  // Sign in raw data is perspective-dependent and must be ignored.
+  const favoriteTeam = consensusSide === 'home' ? homeTeam
+    : consensusSide === 'away' ? awayTeam : homeTeam; // default to home if mixed
+  const underdogTeam = favoriteTeam === homeTeam ? awayTeam : homeTeam;
+  const favIsHome = favoriteTeam === homeTeam;
 
-  // Get run line prices (juice) — normalize so favorite always has -1.5 perspective
-  const rlFavPrices = buildRunLinePrices(openByBook, currByBook, consensusFav === 'home');
-  const rlDogPrices = buildRunLinePrices(openByBook, currByBook, consensusFav !== 'home');
+  // Get run line prices (juice). The spread_home_price is always from home perspective.
+  const rlFavPriceOpens = Object.values(openByBook)
+    .filter(s => nonZero(s.spread) && Math.abs(s.spread) === 1.5)
+    .map(s => favIsHome ? s.spread_home_price : 0)
+    .filter(nonZero);
+  const rlFavPriceCurrs = Object.values(currByBook)
+    .filter(s => nonZero(s.spread) && Math.abs(s.spread) === 1.5)
+    .map(s => favIsHome ? s.spread_home_price : 0)
+    .filter(nonZero);
 
-  // Check for alt lines (non-1.5 run lines)
-  const allSpreads = Object.values(currByBook)
-    .map(s => Math.abs(s.spread))
-    .filter(s => s > 0);
-  const hasAltLine = allSpreads.some(s => s !== 1.5);
+  const rlFavPriceOpen = rlFavPriceOpens.length ? mode(rlFavPriceOpens) : null;
+  const rlFavPriceCurr = rlFavPriceCurrs.length ? mode(rlFavPriceCurrs) : null;
 
-  const runLine: MlbRunLine = {
-    favorite_team: favoriteTeam,
+  // Check if any book has a non-1.5 run line (actual line movement)
+  const allSpreads = Object.values(currByBook).map(s => Math.abs(s.spread)).filter(nonZero);
+  const lineChanged = allSpreads.some(s => s !== 1.5);
+  const priceChanged = (rlFavPriceOpen != null && rlFavPriceCurr != null)
+    ? Math.abs(rlFavPriceCurr - rlFavPriceOpen) >= 5 : false;
+
+  const rlBooksReporting = Object.values(currByBook).filter(s => nonZero(s.spread)).length;
+
+  const runLine: RunLineTruth = {
+    favored_team: favoriteTeam,
     underdog_team: underdogTeam,
     favorite_rl: -1.5,
     underdog_rl: 1.5,
-    favorite_price_open: rlFavPrices.openPrice,
-    favorite_price_current: rlFavPrices.currPrice,
-    favorite_price_delta: rlFavPrices.priceDelta,
-    underdog_price_open: rlDogPrices.openPrice,
-    underdog_price_current: rlDogPrices.currPrice,
-    underdog_price_delta: rlDogPrices.priceDelta,
-    has_alt_line: hasAltLine,
-    books_reporting: Object.keys(currByBook).filter(
-      b => currByBook[b].spread !== 0
-    ).length,
+    open_favorite_price: rlFavPriceOpen,
+    current_favorite_price: rlFavPriceCurr,
+    open_dog_price: null, // away price not stored in current schema
+    current_dog_price: null,
+    favorite_price_delta: (rlFavPriceOpen != null && rlFavPriceCurr != null) ? rlFavPriceCurr - rlFavPriceOpen : 0,
+    underdog_price_delta: 0,
+    books_reporting: rlBooksReporting,
+    line_changed: lineChanged,
+    price_changed: priceChanged,
   };
 
-  // ── Total ────────────────────────────────────────────────────
-  const totalSide = buildMarketSide(openByBook, currByBook, s => s.total, s => s.total_over_price);
-  const overPriceOpen = getFirstNonZero(openByBook, s => s.total_over_price);
-  const overPriceCurr = getLastNonZero(currByBook, s => s.total_over_price);
+  // ── Total ────────────────────────────────────────────────────────
+  const totalOpens = Object.values(openByBook).filter(s => nonZero(s.total)).map(s => s.total);
+  const totalCurrs = Object.values(currByBook).filter(s => nonZero(s.total)).map(s => s.total);
+  const totalOpen = totalOpens.length ? mode(totalOpens) : null;
+  const totalCurr = totalCurrs.length ? mode(totalCurrs) : null;
+  const totalNumDelta = (totalOpen != null && totalCurr != null) ? totalCurr - totalOpen : 0;
 
-  const total: MlbTotal = {
-    open: totalSide.open,
-    current: totalSide.current,
-    number_delta: totalSide.delta,
-    direction: Math.abs(totalSide.delta) < 0.25 ? 'stable'
-      : totalSide.delta > 0 ? 'over' : 'under',
-    over_price_open: overPriceOpen,
-    over_price_current: overPriceCurr,
-    over_price_delta: (overPriceOpen != null && overPriceCurr != null)
-      ? overPriceCurr - overPriceOpen : 0,
-    books_reporting: totalSide.books_reporting,
-    books: totalSide.books,
+  const overPriceOpens = Object.values(openByBook).filter(s => nonZero(s.total_over_price)).map(s => s.total_over_price);
+  const overPriceCurrs = Object.values(currByBook).filter(s => nonZero(s.total_over_price)).map(s => s.total_over_price);
+  const underPriceOpens = Object.values(openByBook).filter(s => nonZero(s.total_under_price)).map(s => s.total_under_price!);
+  const underPriceCurrs = Object.values(currByBook).filter(s => nonZero(s.total_under_price)).map(s => s.total_under_price!);
+
+  const overPriceOpen = overPriceOpens.length ? mode(overPriceOpens) : null;
+  const overPriceCurr = overPriceCurrs.length ? mode(overPriceCurrs) : null;
+  const underPriceOpen = underPriceOpens.length ? mode(underPriceOpens) : null;
+  const underPriceCurr = underPriceCurrs.length ? mode(underPriceCurrs) : null;
+
+  const numberMoved = Math.abs(totalNumDelta) >= 0.5;
+  const overPriceDelta = (overPriceOpen != null && overPriceCurr != null) ? overPriceCurr - overPriceOpen : 0;
+  const underPriceDelta = (underPriceOpen != null && underPriceCurr != null) ? underPriceCurr - underPriceOpen : 0;
+  const juiceShiftOnly = !numberMoved && (Math.abs(overPriceDelta) >= 5 || Math.abs(underPriceDelta) >= 5);
+
+  // Direction logic — check if books disagree for 'mixed'
+  let totalDirection: 'up' | 'down' | 'flat' | 'mixed' = 'flat';
+  if (numberMoved) {
+    const bookDirections = Object.entries(currByBook)
+      .filter(([b]) => openByBook[b] && nonZero(openByBook[b].total) && nonZero(currByBook[b].total))
+      .map(([b]) => Math.sign(currByBook[b].total - openByBook[b].total));
+    const ups = bookDirections.filter(d => d > 0).length;
+    const downs = bookDirections.filter(d => d < 0).length;
+    if (ups > 0 && downs > 0) totalDirection = 'mixed';
+    else if (totalNumDelta > 0) totalDirection = 'up';
+    else totalDirection = 'down';
+  }
+
+  const perBookTotal: MlbBookLine[] = Object.entries(currByBook)
+    .filter(([, s]) => nonZero(s.total))
+    .map(([b, s]) => ({ book: displayBook(b), value: s.total, price: s.total_over_price || null, timestamp: s.fetched_at }));
+
+  const total: TotalTruth = {
+    open: totalOpen,
+    current: totalCurr,
+    number_delta: totalNumDelta,
+    over_open_price: overPriceOpen,
+    over_current_price: overPriceCurr,
+    under_open_price: underPriceOpen,
+    under_current_price: underPriceCurr,
+    over_price_delta: overPriceDelta,
+    under_price_delta: underPriceDelta,
+    direction: totalDirection,
+    books_reporting: perBookTotal.length,
+    per_book: perBookTotal,
+    number_moved: numberMoved,
+    juice_shift_only: juiceShiftOnly,
   };
 
-  // ── Derived Truth ────────────────────────────────────────────
-  const mlMoved = Math.abs(mlHome.delta) >= 5 || Math.abs(mlAway.delta) >= 5;
-  const totalMoved = Math.abs(total.number_delta) >= 0.5;
+  // ── Derived Truth ────────────────────────────────────────────────
+  const mlMoved = Math.abs(moneyline.home_delta) >= 5 || Math.abs(moneyline.away_delta) >= 5;
+  const totalMvd = numberMoved;
 
-  const derivedTruth: MlbDerivedTruth = {
+  const mlDirection: 'home' | 'away' | 'flat' | 'mixed' =
+    moneyline.home_delta === 0 && moneyline.away_delta === 0 ? 'flat'
+      : (homeCurr != null && homeOpen != null && homeCurr < homeOpen) ? 'home'
+        : (awayCurr != null && awayOpen != null && awayCurr < awayOpen) ? 'away' : 'flat';
+
+  // Strongest market: which has the most signal?
+  const mlStrength = Math.max(Math.abs(moneyline.home_delta), Math.abs(moneyline.away_delta));
+  const totalStrength = Math.abs(totalNumDelta) * 20; // Scale total to be comparable with ML cents
+  const rlStrength = priceChanged ? Math.abs(runLine.favorite_price_delta) : 0;
+
+  let strongestMarket: 'moneyline' | 'run_line' | 'total' | 'none' = 'none';
+  const maxStrength = Math.max(mlStrength, totalStrength, rlStrength);
+  if (maxStrength >= 5) {
+    if (mlStrength >= totalStrength && mlStrength >= rlStrength) strongestMarket = 'moneyline';
+    else if (totalStrength >= mlStrength && totalStrength >= rlStrength) strongestMarket = 'total';
+    else strongestMarket = 'run_line';
+  }
+
+  const derivedTruth: DerivedTruth = {
     favorite_team: favoriteTeam,
     underdog_team: underdogTeam,
-    run_line_consistent_with_moneyline: true, // We enforce this via normalization
-    primary_market: 'moneyline',
-    market_regime: mlMoved && totalMoved ? 'both_moving'
+    run_line_consistent_with_moneyline: true, // enforced by normalization
+    moneyline_direction: mlDirection,
+    total_direction: totalDirection,
+    strongest_market: strongestMarket,
+    market_regime: mlMoved && totalMvd ? 'both_moving'
       : mlMoved ? 'ml_moving'
-        : totalMoved ? 'total_moving'
-          : 'stable',
+        : totalMvd ? 'total_moving'
+          : juiceShiftOnly ? 'juice_only'
+            : 'stable',
+    pitcher_context: pitchers?.confirmed ? 'confirmed' : 'unconfirmed',
   };
 
   return {
@@ -165,122 +265,33 @@ export function normalizeMlbMarket(
     event_id: `MLB|${homeTeam}|${awayTeam}|${gameTime}`,
     home_team: homeTeam,
     away_team: awayTeam,
-    game_time: gameTime,
+    game_time_utc: gameTime,
     tracking_hours: trackingHours,
     snapshot_count: snapshots.length,
     starting_pitchers: pitchers ?? { home: null, away: null, confirmed: false },
-    moneyline,
-    run_line: runLine,
-    total,
+    market_state: { moneyline, run_line: runLine, total },
     derived_truth: derivedTruth,
-    signal_summary: {
-      side: { type: 'PASS', confidence: 'Low', direction: '', primary_market: 'moneyline', factors: [] },
-      total: { type: 'PASS', confidence: 'Low', direction: 'stable', factors: [] },
-      status: 'PASS',
-    },
+    signal_summary: { side_signal: 'PASS', total_signal: 'PASS', confidence: 'low', side_reason: '', total_reason: '', status: 'PASS' },
     validation: { is_valid: true, errors: [], warnings: [] },
     public_data: { home_ticket_pct: null, away_ticket_pct: null, home_money_pct: null, away_money_pct: null },
   };
 }
 
-// ── Build Helpers ────────────────────────────────────────────────────────────
+// ── Empty truth ──────────────────────────────────────────────────────────────
 
-function buildMarketSide(
-  openByBook: Record<string, RawOddsSnapshot>,
-  currByBook: Record<string, RawOddsSnapshot>,
-  getValue: (s: RawOddsSnapshot) => number,
-  getPrice: ((s: RawOddsSnapshot) => number) | null,
-): MlbMarketSide {
-  const openValues = Object.values(openByBook)
-    .map(s => getValue(s))
-    .filter(v => v !== 0 && v != null);
-  const currValues = Object.values(currByBook)
-    .map(s => getValue(s))
-    .filter(v => v !== 0 && v != null);
-
-  const openConsensus = openValues.length ? mode(openValues) : 0;
-  const currConsensus = currValues.length ? mode(currValues) : 0;
-
-  const books: MlbBookLine[] = Object.entries(currByBook)
-    .filter(([, s]) => getValue(s) !== 0 && getValue(s) != null)
-    .map(([book, s]) => ({
-      book: displayBook(book),
-      value: getValue(s),
-      price: getPrice ? getPrice(s) : null,
-      timestamp: s.fetched_at,
-    }));
-
-  return {
-    open: openConsensus,
-    current: currConsensus,
-    delta: (openConsensus !== 0 && currConsensus !== 0) ? currConsensus - openConsensus : 0,
-    books,
-    books_reporting: books.length,
-  };
-}
-
-function buildRunLinePrices(
-  openByBook: Record<string, RawOddsSnapshot>,
-  currByBook: Record<string, RawOddsSnapshot>,
-  isHome: boolean,
-): { openPrice: number | null; currPrice: number | null; priceDelta: number } {
-  const getPrice = (s: RawOddsSnapshot) => isHome ? s.spread_home_price : 0; // away price not stored directly
-
-  const openPrices = Object.values(openByBook)
-    .map(s => getPrice(s))
-    .filter(v => v !== 0 && v != null);
-  const currPrices = Object.values(currByBook)
-    .map(s => getPrice(s))
-    .filter(v => v !== 0 && v != null);
-
-  const openPrice = openPrices.length ? mode(openPrices) : null;
-  const currPrice = currPrices.length ? mode(currPrices) : null;
-
-  return {
-    openPrice,
-    currPrice,
-    priceDelta: (openPrice != null && currPrice != null) ? currPrice - openPrice : 0,
-  };
-}
-
-function getFirstNonZero(
-  byBook: Record<string, RawOddsSnapshot>,
-  getValue: (s: RawOddsSnapshot) => number,
-): number | null {
-  for (const s of Object.values(byBook)) {
-    const v = getValue(s);
-    if (v !== 0 && v != null) return v;
-  }
-  return null;
-}
-
-function getLastNonZero(
-  byBook: Record<string, RawOddsSnapshot>,
-  getValue: (s: RawOddsSnapshot) => number,
-): number | null {
-  const entries = Object.values(byBook);
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const v = getValue(entries[i]);
-    if (v !== 0 && v != null) return v;
-  }
-  return null;
-}
-
-function emptyTruthObject(
-  homeTeam: string, awayTeam: string, gameTime: string,
-  pitchers?: MlbStartingPitchers,
-): MlbTruthObject {
-  const emptySide: MlbMarketSide = { open: 0, current: 0, delta: 0, books: [], books_reporting: 0 };
+function emptyTruth(homeTeam: string, awayTeam: string, gameTime: string, pitchers?: PitcherInfo): MlbTruthObject {
   return {
     sport: 'MLB', event_id: `MLB|${homeTeam}|${awayTeam}|${gameTime}`,
-    home_team: homeTeam, away_team: awayTeam, game_time: gameTime,
+    home_team: homeTeam, away_team: awayTeam, game_time_utc: gameTime,
     tracking_hours: 0, snapshot_count: 0,
     starting_pitchers: pitchers ?? { home: null, away: null, confirmed: false },
-    moneyline: { home: emptySide, away: emptySide, consensus_favorite: 'home', consensus_favorite_ml: 0, consensus_underdog_ml: 0 },
-    run_line: { favorite_team: homeTeam, underdog_team: awayTeam, favorite_rl: -1.5, underdog_rl: 1.5, favorite_price_open: null, favorite_price_current: null, favorite_price_delta: 0, underdog_price_open: null, underdog_price_current: null, underdog_price_delta: 0, has_alt_line: false, books_reporting: 0 },
-    total: { open: 0, current: 0, number_delta: 0, direction: 'stable', over_price_open: null, over_price_current: null, over_price_delta: 0, books_reporting: 0, books: [] },
-    derived_truth: { favorite_team: homeTeam, underdog_team: awayTeam, run_line_consistent_with_moneyline: true, primary_market: 'moneyline', market_regime: 'stable' },
-    signal_summary: { side: { type: 'PASS', confidence: 'Low', direction: '', primary_market: 'moneyline', factors: [] }, total: { type: 'PASS', confidence: 'Low', direction: 'stable', factors: [] }, status: 'PASS' },
+    market_state: {
+      moneyline: { home_open: null, home_current: null, away_open: null, away_current: null, home_delta: 0, away_delta: 0, books_reporting: 0, consensus_side: null, per_book_home: [], per_book_away: [] },
+      run_line: { favored_team: null, underdog_team: null, favorite_rl: null, underdog_rl: null, open_favorite_price: null, current_favorite_price: null, open_dog_price: null, current_dog_price: null, favorite_price_delta: 0, underdog_price_delta: 0, books_reporting: 0, line_changed: false, price_changed: false },
+      total: { open: null, current: null, number_delta: 0, over_open_price: null, over_current_price: null, under_open_price: null, under_current_price: null, over_price_delta: 0, under_price_delta: 0, direction: 'flat', books_reporting: 0, per_book: [], number_moved: false, juice_shift_only: false },
+    },
+    derived_truth: { favorite_team: null, underdog_team: null, run_line_consistent_with_moneyline: true, moneyline_direction: 'flat', total_direction: 'flat', strongest_market: 'none', market_regime: 'stable', pitcher_context: 'unconfirmed' },
+    signal_summary: { side_signal: 'PASS', total_signal: 'PASS', confidence: 'low', side_reason: 'No data', total_reason: 'No data', status: 'PASS' },
     validation: { is_valid: false, errors: ['No snapshot data available'], warnings: [] },
     public_data: { home_ticket_pct: null, away_ticket_pct: null, home_money_pct: null, away_money_pct: null },
   };
