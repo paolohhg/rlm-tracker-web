@@ -1630,12 +1630,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log(`[HSA LEAN DIRECTIVE] ${spreadLean} (${spreadConf})`);
     }
 
+    // ── Pre-computed confidence directive ─────────────────────────
+    // Uses the same logic as the dashboard's deriveSideConfidence / deriveTotalConfidence
+    // so HSA output matches what the user sees on the dashboard.
+    let confidenceDirective = '';
+    {
+      let sideConf: string | null = null;
+
+      // MLB: use moneyline movement
+      if (league === 'MLB') {
+        const mlDelta = Math.abs(summary.mlHomeMovement);
+        if (mlDelta >= 20) sideConf = 'High';
+        else if (mlDelta >= 10) sideConf = 'Elevated';
+        else if (mlDelta >= 5) sideConf = 'Moderate';
+      }
+
+      // Fallback: spread movement
+      if (!sideConf && summary.spreadMovement != null) {
+        const abs = Math.abs(summary.spreadMovement);
+        if (abs >= 2) sideConf = 'High';
+        else if (abs >= 1) sideConf = 'Elevated';
+        else if (abs >= 0.5) sideConf = 'Moderate';
+        else if (abs > 0) sideConf = 'Low';
+      }
+
+      // Moneyline movement for non-MLB
+      if (!sideConf && league !== 'MLB' && summary.mlHomeMovement != null) {
+        const mlDelta = Math.abs(summary.mlHomeMovement);
+        if (mlDelta >= 20) sideConf = 'High';
+        else if (mlDelta >= 10) sideConf = 'Elevated';
+        else if (mlDelta >= 5) sideConf = 'Moderate';
+      }
+
+      // Total confidence
+      let totalConf: string | null = null;
+      if (summary.opening.consensusTotal > 0 && summary.current.consensusTotal > 0) {
+        const totalMove = Math.abs(summary.totalMovement);
+        if (totalMove >= 2) totalConf = 'High';
+        else if (totalMove >= 1) totalConf = 'Moderate';
+        else if (totalMove >= 0.5) totalConf = 'Low';
+      }
+
+      if (sideConf || totalConf) {
+        confidenceDirective = [
+          '\n=== CONFIDENCE DIRECTIVE (USE VERBATIM) ===',
+          'IMPORTANT: The confidence levels below were pre-computed from the same data the dashboard uses.',
+          'You MUST use this EXACT confidence level in your output header and Bottom Line.',
+          '',
+          sideConf ? `SIDE CONFIDENCE: ${sideConf}` : 'SIDE CONFIDENCE: Low',
+          totalConf ? `TOTAL CONFIDENCE: ${totalConf}` : '',
+          '',
+          `Use "${sideConf || 'Low'}" as the Confidence value in the header line.`,
+        ].filter(l => l !== '').join('\n');
+
+        console.log(`[HSA CONFIDENCE DIRECTIVE] Side: ${sideConf || 'Low'}, Total: ${totalConf || 'N/A'}`);
+      }
+    }
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context, coordination intel, lean directive, and NHL classification as structured sections
+    // Append lifecycle context, coordination intel, lean directive, confidence directive, and NHL classification
     const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock
       + (leanDirective ? '\n\n' + leanDirective : '')
+      + (confidenceDirective ? '\n\n' + confidenceDirective : '')
       + (nhlClassificationBlock ? '\n\n' + nhlClassificationBlock : '');
 
     // Retry Anthropic API up to 2 times with exponential backoff

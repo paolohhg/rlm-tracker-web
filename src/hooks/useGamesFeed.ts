@@ -830,14 +830,10 @@ export function useGamesFeed() {
     }
   }, []);
 
-  // Trigger odds + signal detection once on mount (fire-and-forget).
-  // Ensures data flows even if Vercel cron isn't active (free plan).
-  useEffect(() => {
-    fetch('/api/fetch-odds').catch(() => {});
-    // detect-rlm needs odds first — delay 30s
-    const timer = setTimeout(() => fetch('/api/detect-rlm').catch(() => {}), 30000);
-    return () => clearTimeout(timer);
-  }, []);
+  // Note: removed fire-and-forget fetch-odds/detect-rlm calls that ran on mount.
+  // The Vercel cron handles odds fetching every 10 min. Calling it from the
+  // frontend caused the dashboard to change every time the page loaded or
+  // HSA was generated (because onSuccess triggers refresh → re-mount).
 
   useEffect(() => {
     fetchGames();
