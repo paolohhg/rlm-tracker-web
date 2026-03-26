@@ -2,13 +2,10 @@
 // HSA only looks back 24h; fetch-odds "seen" check looks back 7 days.
 // Keeps the table small so queries never timeout.
 //
-// Also callable manually: POST /api/purge-old-snapshots
-// to do an immediate cleanup (e.g. after table has grown too large).
+// Also callable manually via browser/curl to do an immediate cleanup.
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
-const BATCH_SIZE = 5000; // Small batches to stay within PostgREST statement timeout
-const MAX_BATCHES = 200; // Up to 1M rows per invocation
 const RETENTION_DAYS = 7;
 
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
@@ -26,49 +23,92 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
   let lastError: string | null = null;
 
   try {
-    for (let i = 0; i < MAX_BATCHES; i++) {
-      // Step 1: Select IDs of oldest rows to delete
-      const { data: rows, error: selectError } = await supabase
+    // Delete in 1-hour windows starting from the oldest data,
+    // working forward until we reach the retention cutoff.
+    // Each window is small enough to avoid statement timeout.
+
+    // First, find the oldest row's timestamp
+    const { data: oldest, error: oldestErr } = await supabase
+      .from('odds_snapshots')
+      .select('fetched_at')
+      .order('fetched_at', { ascending: true })
+      .limit(1);
+
+    if (oldestErr) {
+      return res.status(500).json({ error: 'Failed to query oldest row', detail: oldestErr.message });
+    }
+
+    if (!oldest?.length) {
+      return res.status(200).json({ ok: true, deleted: 0, message: 'Table is empty' });
+    }
+
+    const oldestTime = new Date(oldest[0].fetched_at).getTime();
+    const cutoffTime = new Date(cutoff).getTime();
+
+    if (oldestTime >= cutoffTime) {
+      return res.status(200).json({ ok: true, deleted: 0, message: 'No rows older than retention period' });
+    }
+
+    // Delete in 1-hour windows (small enough to not timeout)
+    const ONE_HOUR = 60 * 60 * 1000;
+    const MAX_WINDOWS = 100; // Safety cap per invocation
+    let windowStart = oldestTime;
+
+    for (let i = 0; i < MAX_WINDOWS && windowStart < cutoffTime; i++) {
+      const windowEnd = Math.min(windowStart + ONE_HOUR, cutoffTime);
+      const startISO = new Date(windowStart).toISOString();
+      const endISO = new Date(windowEnd).toISOString();
+
+      const { count, error: delError } = await supabase
         .from('odds_snapshots')
-        .select('id')
-        .lt('fetched_at', cutoff)
-        .order('fetched_at', { ascending: true })
-        .limit(BATCH_SIZE);
-
-      if (selectError) {
-        lastError = selectError.message;
-        console.error(`[purge] Select batch ${i + 1} error: ${lastError}`);
-        break;
-      }
-
-      if (!rows || rows.length === 0) break; // Done
-
-      // Step 2: Delete those specific IDs
-      const ids = rows.map((r: any) => r.id);
-      const { error: delError } = await supabase
-        .from('odds_snapshots')
-        .delete()
-        .in('id', ids);
+        .delete({ count: 'exact' })
+        .gte('fetched_at', startISO)
+        .lt('fetched_at', endISO);
 
       if (delError) {
         lastError = delError.message;
-        console.error(`[purge] Delete batch ${i + 1} error: ${lastError}`);
-        break;
+        console.error(`[purge] Window ${i + 1} error (${startISO} to ${endISO}): ${lastError}`);
+        // Try a smaller window (15 min) on error
+        const FIFTEEN_MIN = 15 * 60 * 1000;
+        let subStart = windowStart;
+        for (let j = 0; j < 4 && subStart < windowEnd; j++) {
+          const subEnd = Math.min(subStart + FIFTEEN_MIN, windowEnd);
+          const { count: subCount, error: subErr } = await supabase
+            .from('odds_snapshots')
+            .delete({ count: 'exact' })
+            .gte('fetched_at', new Date(subStart).toISOString())
+            .lt('fetched_at', new Date(subEnd).toISOString());
+
+          if (subErr) {
+            lastError = subErr.message;
+            console.error(`[purge] Sub-window error: ${lastError}`);
+          } else {
+            totalDeleted += subCount ?? 0;
+          }
+          subStart = subEnd;
+        }
+        batches++;
+        windowStart = windowEnd;
+        continue;
       }
 
-      totalDeleted += ids.length;
+      const deleted = count ?? 0;
+      totalDeleted += deleted;
       batches++;
-      console.log(`[purge] Batch ${i + 1}: deleted ${ids.length} rows (total: ${totalDeleted})`);
-
-      if (ids.length < BATCH_SIZE) break; // No more rows
+      if (deleted > 0) {
+        console.log(`[purge] Window ${i + 1}: deleted ${deleted} rows (${startISO} to ${endISO})`);
+      }
+      windowStart = windowEnd;
     }
 
-    console.log(`[purge] Done: ${totalDeleted} rows deleted in ${batches} batches`);
+    const moreRemaining = windowStart < cutoffTime;
+    console.log(`[purge] Done: ${totalDeleted} rows deleted in ${batches} windows`);
     return res.status(200).json({
       ok: true,
       deleted: totalDeleted,
       batches,
       retention_days: RETENTION_DAYS,
+      ...(moreRemaining ? { message: 'More rows remain — refresh to continue' } : {}),
       ...(lastError ? { last_error: lastError } : {}),
     });
   } catch (err: any) {
