@@ -1166,19 +1166,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── When force-refreshing, pull fresh odds first ──────────────
+    // Use the Vercel fetch-odds endpoint (NOT the Supabase edge function,
+    // which has a stale deployed version with broken commenceTimeTo).
     if (force) {
       try {
-        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (supabaseUrl && serviceKey) {
-          await fetch(`${supabaseUrl}/functions/v1/fetch-odds`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${serviceKey}`,
-              'Content-Type': 'application/json',
-            },
-          });
-        }
+        // Use relative URL to call our own Vercel endpoint
+        const baseUrl = process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : 'http://localhost:3000';
+        await fetch(`${baseUrl}/api/fetch-odds`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
       } catch { /* non-critical — continue with existing data */ }
     }
 
