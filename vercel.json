@@ -15,6 +15,10 @@
     {
       "path": "/api/generate-overnight-report",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/purge-old-snapshots",
+      "schedule": "0 6 * * *"
     }
   ]
 }
