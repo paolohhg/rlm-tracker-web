@@ -2,6 +2,8 @@
 // Runs every 15 min via Vercel cron (see vercel.json), after fetch-odds.
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
+export const maxDuration = 60;
+
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
   try {
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;

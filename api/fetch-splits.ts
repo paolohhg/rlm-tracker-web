@@ -3,6 +3,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
+export const maxDuration = 60;
+
 // ── Config ──────────────────────────────────────────────────────────
 
 const ACTION_NETWORK_API = 'https://api.actionnetwork.com/web/v1/scoreboard';

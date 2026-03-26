@@ -743,6 +743,15 @@ export function useGamesFeed() {
     }
   }, []);
 
+  // Trigger odds + signal detection once on mount (fire-and-forget).
+  // Ensures data flows even if Vercel cron isn't active (free plan).
+  useEffect(() => {
+    fetch('/api/fetch-odds').catch(() => {});
+    // detect-rlm needs odds first — delay 30s
+    const timer = setTimeout(() => fetch('/api/detect-rlm').catch(() => {}), 30000);
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     fetchGames();
     const interval = setInterval(fetchGames, 30000);
