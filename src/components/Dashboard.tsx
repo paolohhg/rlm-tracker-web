@@ -369,7 +369,7 @@ function extractHsaField(text: string, field: string): string {
 }
 
 // ── HSA Modal ────────────────────────────────────────────────
-function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () => void; onRefresh: () => void }) {
+function HsaModal({ game, onClose }: { game: GameView; onClose: () => void }) {
   const [localNarrative, setLocalNarrative] = useState<string | null>(game.hsaNarrative);
   // No-op onRefresh — HSA modal should NOT refresh the entire dashboard
   const { generate, loading, error } = useGenerateHsa();
@@ -1214,7 +1214,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={() => {}} />}
+      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} />}
       {/* logCycleGame modal removed — HM Cycles hidden for now */}
       {shareStudioGame && <ShareStudio game={shareStudioGame} onClose={() => setShareStudioGame(null)} />}
     </div>
