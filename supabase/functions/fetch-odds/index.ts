@@ -8,9 +8,9 @@ const SHARP_BOOKS = new Set(["pinnacle", "circa", "bookmaker", "heritage"]);
 const LEAGUES = [
   { key: "basketball_nba",          league: "NBA"   },
   { key: "basketball_ncaab",        league: "NCAAB" },
-  { key: "basketball_ncaab_nit",    league: "NCAAB" }, // NIT Tournament
+  // basketball_ncaab_nit removed — NIT tournament is seasonal, API returns 404 when inactive
   { key: "baseball_mlb",            league: "MLB"   },
-  { key: "baseball_mlb_preseason",  league: "MLB"   }, // Spring Training
+  // baseball_mlb_preseason removed — Spring Training is over
   { key: "icehockey_nhl",           league: "NHL"   },
 ];
 
