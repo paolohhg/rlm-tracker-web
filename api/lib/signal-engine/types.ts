@@ -128,6 +128,7 @@ export interface MarketState {
 // ── Signal Classification ────────────────────────────────────────────────────
 
 export type SignalType =
+  | 'FULL_BOOK_CONSENSUS'
   | 'REVERSE_LINE_MOVEMENT'
   | 'STEAM_MOVE'
   | 'MARKET_AGREEMENT'

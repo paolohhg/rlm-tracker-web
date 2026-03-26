@@ -55,6 +55,16 @@ Book Coordination - Several sportsbooks adjusting together in the same direction
 Market Pressure - Gradual movement over time suggesting sustained action entering the market.
 Price Discovery - Early disagreement between sportsbooks followed by convergence.
 
+FULL BOOK CONSENSUS SIGNAL
+Full Book Consensus - All tracked sportsbooks (4 or more) moved in the same direction within a 60-minute window.
+This is the strongest coordination signal and MUST override any "static board" or PASS classification.
+When Full Book Consensus is detected:
+- Explicitly state: "All tracked books moved in the same direction within X minutes"
+- Identify the lead book (especially if sharp)
+- Identify the number of books and market type
+- If public opposes the move: this is FULL_BOOK_CONSENSUS + RLM (elite signal, must be ACTIVE)
+- If public aligns: this is FULL_BOOK_CONSENSUS + MARKET_AGREEMENT (high-confidence WATCH or ACTIVE)
+
 CONFIDENCE SCALE
 Confidence reflects clarity of the market signal, NOT certainty of game outcome.
 Low, Moderate, High
