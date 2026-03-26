@@ -175,13 +175,24 @@ function classifyOddsRow(
       skipReason = `spread ${row.spread} exceeds ${league} max ${spreadBounds.max}`;
     }
 
+    // MLB run line normalization: the run line is structurally ±1.5.
+    // Different books may report +1.5 or -1.5 for the same home team
+    // depending on which team they list as favorite. This is NOT movement.
+    // Normalize: always store the absolute value (1.5) for MLB run lines
+    // to prevent false "3-point moves" or "consensus flips."
+    let normalizedSpread = row.spread;
+    if (league === 'MLB' && absSpread === 1.5) {
+      // Use absolute value — sign differences are team-side perspective, not movement
+      normalizedSpread = 1.5;
+    }
+
     results.push({
       eventId, sport, book, bookType,
       marketType: 'spread',
       period: 'full_game',
       betType: 'main',
       side: 'home',
-      line: row.spread,
+      line: normalizedSpread,
       price: row.spread_home_price,
       timestamp,
       sourceLabel: `${book} spread ${row.spread}`,
@@ -1298,7 +1309,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...raw,
         total: (totalClassified && totalClassified.usable) ? raw.total : 0,
         total_over_price: (totalClassified && totalClassified.usable) ? raw.total_over_price : 0,
-        spread: (spreadClassified && spreadClassified.usable) ? raw.spread : 0,
+        // Use the normalized spread from classification (handles MLB ±1.5 normalization)
+        spread: (spreadClassified && spreadClassified.usable) ? (spreadClassified.line ?? raw.spread) : 0,
         spread_home_price: (spreadClassified && spreadClassified.usable) ? raw.spread_home_price : 0,
       };
     });
