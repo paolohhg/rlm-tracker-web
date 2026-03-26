@@ -512,6 +512,18 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
   );
 }
 
+// ── Confidence color mapping ──────────────────────────────────
+function confidenceColor(level: string): { bg: string; text: string } {
+  switch (level) {
+    case 'Very High': return { bg: '#dc262622', text: '#ff4d4d' };
+    case 'High': return { bg: '#f9731622', text: '#f97316' };
+    case 'Elevated': return { bg: '#eab30822', text: '#eab308' };
+    case 'Moderate': return { bg: '#3b82f622', text: '#60a5fa' };
+    case 'Low': return { bg: '#6b728022', text: '#9ca3af' };
+    default: return { bg: '#6b728022', text: '#9ca3af' };
+  }
+}
+
 // ── Desktop Table Row ────────────────────────────────────────
 function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView; ncaabLogos: Record<string, string>; onOpenHsa: (game: GameView) => void; onShare: (game: GameView) => void }) {
   const [hovered, setHovered] = useState(false);
@@ -666,6 +678,42 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
         <div style={{ color: T.textSecondary, fontWeight: 600, fontSize: '12px', fontFamily: T.font }}>{consensusDisplay()}</div>
       </td>
 
+      {/* CONFIDENCE */}
+      <td style={{ padding: '12px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
+        {(game.sideConfidence || game.totalConfidence) ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
+            {game.sideConfidence && (
+              <span style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                fontFamily: T.font,
+                padding: '2px 6px',
+                borderRadius: '4px',
+                backgroundColor: confidenceColor(game.sideConfidence).bg,
+                color: confidenceColor(game.sideConfidence).text,
+              }}>
+                S: {game.sideConfidence}
+              </span>
+            )}
+            {game.totalConfidence && (
+              <span style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                fontFamily: T.font,
+                padding: '2px 6px',
+                borderRadius: '4px',
+                backgroundColor: confidenceColor(game.totalConfidence).bg,
+                color: confidenceColor(game.totalConfidence).text,
+              }}>
+                T: {game.totalConfidence}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span style={{ color: T.muted, fontSize: '11px', fontFamily: T.font }}>—</span>
+        )}
+      </td>
+
       {/* SIGNALS */}
       <td style={{ padding: '12px 8px', verticalAlign: 'middle' }}>
         <SignalBadges game={game} />
@@ -709,7 +757,7 @@ function GameTable({ games, ncaabLogos, onOpenHsa, onShare }: { games: GameView[
       <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: T.font }}>
         <thead>
           <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-            {['GAME', 'SPREAD', 'TOTAL', 'ML', 'MOVE', 'CONSENSUS', 'SIGNALS', 'INTEL', ''].map((col, i) => (
+            {['GAME', 'SPREAD', 'TOTAL', 'ML', 'MOVE', 'CONSENSUS', 'CONFIDENCE', 'SIGNALS', 'INTEL', ''].map((col, i) => (
               <th key={col || `empty-${i}`} style={{
                 padding: '10px 8px',
                 textAlign: col === 'GAME' ? 'left' : 'center',
@@ -841,6 +889,32 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
           </div>
         </div>
       </div>
+
+      {/* Confidence */}
+      {(game.sideConfidence || game.totalConfidence) && (
+        <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+          {game.sideConfidence && (
+            <span style={{
+              fontSize: '10px', fontWeight: 700, fontFamily: T.font,
+              padding: '2px 8px', borderRadius: '4px',
+              backgroundColor: confidenceColor(game.sideConfidence).bg,
+              color: confidenceColor(game.sideConfidence).text,
+            }}>
+              Side: {game.sideConfidence}
+            </span>
+          )}
+          {game.totalConfidence && (
+            <span style={{
+              fontSize: '10px', fontWeight: 700, fontFamily: T.font,
+              padding: '2px 8px', borderRadius: '4px',
+              backgroundColor: confidenceColor(game.totalConfidence).bg,
+              color: confidenceColor(game.totalConfidence).text,
+            }}>
+              Total: {game.totalConfidence}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Badges */}
       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>

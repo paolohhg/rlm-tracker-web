@@ -83,6 +83,10 @@ export interface GameView {
 
   isLocked: boolean
   lastUpdated: string
+
+  // Confidence (derived from signal tier + market movement)
+  sideConfidence: string | null
+  totalConfidence: string | null
 }
 
 export interface FilterState {

@@ -4,6 +4,75 @@ import type { GameView, GameStatus, HsaStatus, SignalTier, Tournament } from '..
 import { computeResistance } from '../lib/intelligence/resistance';
 import { computeFakeSteam } from '../lib/intelligence/fake-steam';
 
+// ── Confidence derivation (side + total) ──────────────────────────────────
+
+function deriveSideConfidence(
+  signalTier: string | null,
+  lineMoveAmount: number | null,
+  league: string,
+  openMlHome: number | null,
+  currMlHome: number | null,
+): string | null {
+  // For MLB, factor in moneyline movement (primary signal market)
+  if (league === 'MLB' && openMlHome != null && currMlHome != null) {
+    const mlDelta = Math.abs(currMlHome - openMlHome);
+    if (mlDelta >= 20) return 'High';
+    if (mlDelta >= 10) return 'Elevated';
+    if (mlDelta >= 5) return 'Moderate';
+  }
+
+  // Signal tier based confidence
+  switch (signalTier) {
+    case 'DOUBLE NO-NARRATIVE RLM': return 'Very High';
+    case 'NO-NARRATIVE RLM': return 'High';
+    case 'STEAM MOVE': return 'Elevated';
+    case 'SHARP ACCUMULATION': return 'Elevated';
+    case 'FROZEN LINE': return 'Moderate';
+    case 'BOOK SHADE': return 'Moderate';
+    case 'CONTRA MOVE': return 'Moderate';
+    case 'WATCH': return 'Low';
+    case 'TRACKING': return 'Low';
+  }
+
+  // Fallback: derive from spread movement magnitude
+  if (lineMoveAmount != null) {
+    const abs = Math.abs(lineMoveAmount);
+    if (abs >= 2) return 'High';
+    if (abs >= 1) return 'Elevated';
+    if (abs >= 0.5) return 'Moderate';
+    if (abs > 0) return 'Low';
+  }
+
+  return null;
+}
+
+function deriveTotalConfidence(
+  openingTotal: number | null,
+  currentTotal: number | null,
+  overTicketPct: number | null,
+  underTicketPct: number | null,
+  overMoneyPct: number | null,
+  underMoneyPct: number | null,
+): string | null {
+  if (openingTotal == null || currentTotal == null) return null;
+  const totalMove = Math.abs(currentTotal - openingTotal);
+
+  const hasSplits = overTicketPct != null && underTicketPct != null;
+  const hasMoney = overMoneyPct != null && underMoneyPct != null;
+
+  // Reverse total movement = stronger signal
+  const isReverse = hasSplits && (
+    (currentTotal > openingTotal && underTicketPct! > overTicketPct!) ||
+    (currentTotal < openingTotal && overTicketPct! > underTicketPct!)
+  );
+
+  if (totalMove >= 2 && isReverse) return 'High';
+  if (totalMove >= 1.5 && isReverse) return 'Elevated';
+  if (totalMove >= 1 || (totalMove >= 0.5 && (hasMoney || hasSplits))) return 'Moderate';
+  if (totalMove >= 0.5) return 'Low';
+  return null;
+}
+
 function deriveFallbackStatus(gameTime: string): GameStatus {
   const now = Date.now();
   const tip = new Date(gameTime).getTime();
@@ -731,6 +800,23 @@ export function useGamesFeed() {
             score?.scheduled_at ??
             t.created_at ??
             new Date().toISOString(),
+
+          // Confidence: derive from signal tier + market movement
+          sideConfidence: deriveSideConfidence(
+            alert?.signal_tier ?? alert?.overall_badge ?? null,
+            lineMoveAmount,
+            t.league as string,
+            openingMoneylineHome as number | null,
+            moneylineHome as number | null,
+          ),
+          totalConfidence: deriveTotalConfidence(
+            openingTotal,
+            currentTotal,
+            split?.total_over_ticket_pct ?? null,
+            split?.total_under_ticket_pct ?? null,
+            split?.total_over_money_pct ?? null,
+            split?.total_under_money_pct ?? null,
+          ),
         };
       });
 
