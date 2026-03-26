@@ -42,6 +42,7 @@ export const CONFIDENCE_THRESHOLDS = {
  * Even if individual factors are low, certain signal types carry baseline confidence.
  */
 export const SIGNAL_TYPE_FLOORS: Record<string, number> = {
+  FULL_BOOK_CONSENSUS: 55,  // Base floor — all books agree
   REVERSE_LINE_MOVEMENT: 35,
   STEAM_MOVE: 40,
   MARKET_AGREEMENT: 15,
@@ -50,3 +51,19 @@ export const SIGNAL_TYPE_FLOORS: Record<string, number> = {
   FAKE_STEAM: 5,
   NOISE: 0,
 };
+
+/**
+ * FULL_BOOK_CONSENSUS scoring boosts (applied on top of standard scoring).
+ *
+ * Base boost: +30 confidence
+ * Sharp book leads: +50
+ * Against public: +70 (elite signal)
+ * Key number crossed: +10 bonus
+ * Reversal after: penalty (handled by FAKE_STEAM classifier)
+ */
+export const FBC_BOOSTS = {
+  BASE: 30,
+  SHARP_LED: 50,
+  AGAINST_PUBLIC: 70,
+  KEY_NUMBER_CROSSED: 10,
+} as const;

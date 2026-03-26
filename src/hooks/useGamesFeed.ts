@@ -23,6 +23,7 @@ function deriveSideConfidence(
 
   // Signal tier based confidence
   switch (signalTier) {
+    case 'FULL_BOOK_CONSENSUS': return 'Very High';
     case 'DOUBLE NO-NARRATIVE RLM': return 'Very High';
     case 'NO-NARRATIVE RLM': return 'High';
     case 'STEAM MOVE': return 'Elevated';

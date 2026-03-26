@@ -16,7 +16,7 @@ import type {
   ConfidenceBucket,
   SignalWeights,
 } from '../types';
-import { DEFAULT_SIGNAL_WEIGHTS, CONFIDENCE_THRESHOLDS, SIGNAL_TYPE_FLOORS } from '../config/signal-weights';
+import { DEFAULT_SIGNAL_WEIGHTS, CONFIDENCE_THRESHOLDS, SIGNAL_TYPE_FLOORS, FBC_BOOSTS } from '../config/signal-weights';
 import { getMarketThresholds } from '../config/league-thresholds';
 import { computeWeightedCoordination, isSharpLed } from '../classify/book-intelligence';
 
@@ -162,6 +162,38 @@ export function scoreSignal(
     );
   }
 
+  // ── FULL_BOOK_CONSENSUS Boosts ────────────────────────────────────
+  let fbcBoost = 0;
+  if (classification.type === 'FULL_BOOK_CONSENSUS') {
+    fbcBoost += FBC_BOOSTS.BASE;
+    explanation.push(`Full Book Consensus base boost → +${FBC_BOOSTS.BASE} pts.`);
+
+    // Sharp-led boost
+    const sharpLedFbc = isSharpLed(state.books, Math.sign(state.move), getMarketThresholds(state.league, state.market_type).meaningful_move);
+    if (sharpLedFbc) {
+      fbcBoost += FBC_BOOSTS.SHARP_LED;
+      explanation.push(`Sharp book led FBC → +${FBC_BOOSTS.SHARP_LED} pts.`);
+    }
+
+    // Against-public boost (elite signal)
+    const pubFbc = state.public_data;
+    if (pubFbc.home_ticket_pct != null) {
+      const publicOnHomeFbc = pubFbc.home_ticket_pct > 50;
+      const moveTowardHomeFbc = state.move < 0;
+      const moveAgainstPublicFbc = (publicOnHomeFbc && !moveTowardHomeFbc) || (!publicOnHomeFbc && moveTowardHomeFbc);
+      if (moveAgainstPublicFbc) {
+        fbcBoost += FBC_BOOSTS.AGAINST_PUBLIC;
+        explanation.push(`FBC against public → +${FBC_BOOSTS.AGAINST_PUBLIC} pts (elite signal).`);
+      }
+    }
+
+    // Key number crossing bonus
+    if (classification.key_number_crossed) {
+      fbcBoost += FBC_BOOSTS.KEY_NUMBER_CROSSED;
+      explanation.push(`FBC crossed key number → +${FBC_BOOSTS.KEY_NUMBER_CROSSED} pts.`);
+    }
+  }
+
   // ── Compute Total ──────────────────────────────────────────────────
   const rawTotal =
     moveMagnitude +
@@ -172,7 +204,8 @@ export function scoreSignal(
     publicDivergence +
     reversalPenalty +
     staleMarketPenalty +
-    incompleteBoardPenalty;
+    incompleteBoardPenalty +
+    fbcBoost;
 
   // Apply signal-type floor
   const floor = SIGNAL_TYPE_FLOORS[classification.type] ?? 0;

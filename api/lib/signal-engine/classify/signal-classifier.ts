@@ -96,17 +96,18 @@ export function buildDirectionalMove(
 // ── Signal Classification Entry Point ────────────────────────────────────────
 
 /**
- * Classify a MarketState into one of 7 signal types.
+ * Classify a MarketState into one of 8 signal types.
  *
  * Classification priority (first match wins):
- *   1. FAKE_STEAM — isolated move without confirmation
- *   2. STEAM_MOVE — coordinated fast move (checked BEFORE disagreement
+ *   1. FULL_BOOK_CONSENSUS — all (≥4) books moved same direction within time window
+ *   2. FAKE_STEAM — isolated move without confirmation
+ *   3. STEAM_MOVE — coordinated fast move (checked BEFORE disagreement
  *      because a one-book holdout does not negate coordinated action)
- *   3. REVERSE_LINE_MOVEMENT — line vs public
- *   4. BOOK_DISAGREEMENT — fragmented market with no clear consensus
- *   5. MARKET_AGREEMENT — public, money, line aligned
- *   6. FROZEN_LINE — public pressure but no movement
- *   7. NOISE — everything else
+ *   4. REVERSE_LINE_MOVEMENT — line vs public
+ *   5. BOOK_DISAGREEMENT — fragmented market with no clear consensus
+ *   6. MARKET_AGREEMENT — public, money, line aligned
+ *   7. FROZEN_LINE — public pressure but no movement
+ *   8. NOISE — everything else
  */
 export function classifySignal(state: MarketState): SignalClassification {
   const T = getMarketThresholds(state.league, state.market_type);
@@ -126,46 +127,49 @@ export function classifySignal(state: MarketState): SignalClassification {
     crossed_number: keyNumberResult.number,
   };
 
-  // 1. FAKE_STEAM — isolated move without confirmation
+  // 1. FULL_BOOK_CONSENSUS — all books moved same direction within window
+  const fbcResult = checkFullBookConsensus(state, T, leadership);
+  if (fbcResult.match) {
+    return { type: 'FULL_BOOK_CONSENSUS', factors: fbcResult.factors, ...base };
+  }
+
+  // 2. FAKE_STEAM — isolated move without confirmation
   const fakeResult = checkFakeSteam(state, T);
   if (fakeResult.match) {
     return { type: 'FAKE_STEAM', factors: fakeResult.factors, ...base };
   }
 
-  // 2. STEAM_MOVE — coordinated fast move
-  //    Checked BEFORE disagreement: when 3/4 books agree, that's steam,
-  //    even if the holdout creates technical disagreement.
+  // 3. STEAM_MOVE — coordinated fast move
   const steamResult = checkSteam(state, T, leadership);
   if (steamResult.match) {
     return { type: 'STEAM_MOVE', factors: steamResult.factors, ...base };
   }
 
-  // 3. REVERSE_LINE_MOVEMENT — line vs public
+  // 4. REVERSE_LINE_MOVEMENT — line vs public
   const rlmResult = checkRLM(state, T, leadership);
   if (rlmResult.match) {
     return { type: 'REVERSE_LINE_MOVEMENT', factors: rlmResult.factors, ...base };
   }
 
-  // 4. BOOK_DISAGREEMENT — fragmented market with no majority consensus
-  //    Only triggers when books are truly split (no clear majority moved).
+  // 5. BOOK_DISAGREEMENT — fragmented market with no majority consensus
   const disagreeResult = checkBookDisagreement(state, T, disagreement);
   if (disagreeResult.match) {
     return { type: 'BOOK_DISAGREEMENT', factors: disagreeResult.factors, ...base };
   }
 
-  // 5. MARKET_AGREEMENT — public + money + line aligned
+  // 6. MARKET_AGREEMENT — public + money + line aligned
   const agreementResult = checkMarketAgreement(state, T);
   if (agreementResult.match) {
     return { type: 'MARKET_AGREEMENT', factors: agreementResult.factors, ...base };
   }
 
-  // 6. FROZEN_LINE — public pressure but no movement
+  // 7. FROZEN_LINE — public pressure but no movement
   const frozenResult = checkFrozen(state, T);
   if (frozenResult.match) {
     return { type: 'FROZEN_LINE', factors: frozenResult.factors, ...base };
   }
 
-  // 7. NOISE — default
+  // 8. NOISE — default
   return {
     type: 'NOISE',
     factors: [
@@ -419,6 +423,98 @@ function checkFrozen(
 
   if (state.total_books >= 3) {
     factors.push(`${state.total_books} books holding steady.`);
+  }
+
+  return { match: true, factors };
+}
+
+// ── FULL_BOOK_CONSENSUS ──────────────────────────────────────────────────────
+// All tracked books (≥4) moved in the same direction within a time window.
+// This is the strongest coordination signal — overrides "static board" logic.
+
+const FULL_BOOK_CONSENSUS_WINDOW_MINUTES = 60;
+const FULL_BOOK_CONSENSUS_MIN_BOOKS = 4;
+
+function checkFullBookConsensus(
+  state: MarketState,
+  T: MarketThresholds,
+  leadership: import('../types').LeaderFollowerResult,
+): CheckResult {
+  const factors: string[] = [];
+  const absMove = Math.abs(state.move);
+
+  // Must have meaningful movement
+  if (absMove < T.meaningful_move) return { match: false, factors };
+
+  // Must have minimum books tracked
+  if (state.total_books < FULL_BOOK_CONSENSUS_MIN_BOOKS) return { match: false, factors };
+
+  const movedCount = state.books_moved_consensus.length;
+  const heldCount = state.books_held.length;
+
+  // ALL books must have moved in the same direction (allow 0 holdouts,
+  // or at most 1 holdout if we have ≥5 books)
+  const maxHoldouts = state.total_books >= 5 ? 1 : 0;
+  if (heldCount > maxHoldouts) return { match: false, factors };
+
+  // Must be within the time window
+  if (leadership.follow_window_minutes > FULL_BOOK_CONSENSUS_WINDOW_MINUTES) {
+    return { match: false, factors };
+  }
+
+  // All conditions met — this is full book consensus
+  const windowDesc = leadership.follow_window_minutes < 1
+    ? 'within the same polling window'
+    : `within ${leadership.follow_window_minutes} minutes`;
+
+  factors.push(
+    `All ${movedCount} tracked books moved in the same direction ${windowDesc}.`,
+  );
+  factors.push(
+    `Move: ${absMove.toFixed(1)} pts across ${movedCount}/${state.total_books} books.`,
+  );
+
+  // Sharp book leadership detection
+  const sharpLed = isSharpLed(
+    state.books, Math.sign(state.move), T.meaningful_move,
+  );
+  if (sharpLed && leadership.leader) {
+    factors.push(`Sharp book ${leadership.leader} led the move.`);
+  } else if (leadership.leader) {
+    factors.push(`${leadership.leader} led the move.`);
+  }
+
+  // Public alignment detection
+  const pub = state.public_data;
+  if (pub.home_ticket_pct != null) {
+    const publicOnHome = pub.home_ticket_pct > 50;
+    const moveTowardHome = state.move < 0;
+    const publicAligned = (publicOnHome && moveTowardHome) || (!publicOnHome && !moveTowardHome);
+    const publicTeam = publicOnHome ? state.home_team : state.away_team;
+    const publicPct = publicOnHome ? pub.home_ticket_pct : (pub.away_ticket_pct ?? (100 - pub.home_ticket_pct));
+
+    if (publicAligned) {
+      factors.push(
+        `Public aligned (${publicPct}% on ${publicTeam}) — classified as FULL_BOOK_CONSENSUS + MARKET_AGREEMENT.`,
+      );
+    } else {
+      factors.push(
+        `Public OPPOSED (${publicPct}% on ${publicTeam}) — FULL_BOOK_CONSENSUS with RLM overlay (elite signal).`,
+      );
+    }
+  }
+
+  // Key number crossing
+  if (state.market_type !== 'moneyline') {
+    const keyResult = checkKeyNumberCrossing(state.opener, state.current, T);
+    if (keyResult.crossed) {
+      factors.push(`Crossed key number ${keyResult.number}.`);
+    }
+  }
+
+  if (heldCount > 0) {
+    const heldNames = state.books_held.map(b => b.book).join(', ');
+    factors.push(`${heldCount} holdout(s): ${heldNames}.`);
   }
 
   return { match: true, factors };
