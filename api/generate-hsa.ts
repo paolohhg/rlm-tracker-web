@@ -140,7 +140,26 @@ When analyzing NHL games, follow these additional rules:
 
 4. COORDINATION THRESHOLDS: 1 book = isolated (never call steam), 2 books = partial (never call confirmed steam), 3 books = meaningful coordination, 4+ books = strong confirmation.
 
-5. If an NHL MARKET CLASSIFICATION section is provided in the input, you MUST respect its signal_type, confidence, and status values. Do not override the pre-computed classification with your own interpretation.`;
+5. If an NHL MARKET CLASSIFICATION section is provided in the input, you MUST respect its signal_type, confidence, and status values. Do not override the pre-computed classification with your own interpretation.
+
+MLB-SPECIFIC RULES
+When analyzing MLB games, follow these additional rules:
+
+1. PRIMARY SIGNAL MARKET: In MLB, the MONEYLINE is the primary signal market, NOT the run line (spread). The run line is almost always ±1.5 and rarely moves. A static run line does NOT mean "no movement."
+
+2. MARKET EVALUATION ORDER: Always evaluate MLB markets in this order: Moneyline → Total → Run line. Anchor your analysis on the market that actually moved.
+
+3. MONEYLINE MOVEMENT THRESHOLDS: A 5-cent move is notable. A 10-cent move is meaningful. A 15+ cent move (e.g. +115 → +100) is significant market activity. NEVER describe an MLB game as "static" or "PASS" when moneyline moved ≥10 cents.
+
+4. RUN LINE NORMALIZATION: The run line is always ±1.5 in MLB. When describing it, always specify which team has +1.5 and which has -1.5. Do not interpret +1.5 vs -1.5 across books as "disagreement" unless the team assignment is actually different — the sign depends on which team the book lists as favorite.
+
+5. MARKET LEAN FOR MLB: Use moneyline-based language (e.g. "Pirates +100 ML" or "Mets -120 ML") rather than run-line language (e.g. "Pirates +1.5").
+
+6. FORBIDDEN MLB LANGUAGE:
+- "Static board" when moneyline moved ≥10 cents
+- "No movement detected" when moneyline moved
+- "All books held" when only referring to run line while ignoring moneyline movement
+- Leading with run line analysis when moneyline is the active market`;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -313,12 +332,16 @@ interface OddsSummary {
   snapshotCount: number;
   trackingHours: number;
   books: string[];
-  opening: { time: string; books: BookLine[]; consensusSpread: number; consensusTotal: number };
-  current: { time: string; books: BookLine[]; consensusSpread: number; consensusTotal: number };
+  opening: { time: string; books: BookLine[]; consensusSpread: number; consensusTotal: number; consensusMlHome: number; consensusMlAway: number };
+  current: { time: string; books: BookLine[]; consensusSpread: number; consensusTotal: number; consensusMlHome: number; consensusMlAway: number };
   spreadMovement: number;
   totalMovement: number;
   spreadDirection: string;
   totalDirection: string;
+  // Moneyline movement tracking (critical for MLB)
+  mlHomeMovement: number;
+  mlAwayMovement: number;
+  mlDirection: string;
   velocityPerHour: number;
   maxBookDisagreement: number;
   timeline: TimelinePoint[];
@@ -425,9 +448,10 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   if (!snapshots.length) {
     return {
       snapshotCount: 0, trackingHours: 0, books: [],
-      opening: { time: '', books: [], consensusSpread: 0, consensusTotal: 0 },
-      current: { time: '', books: [], consensusSpread: 0, consensusTotal: 0 },
+      opening: { time: '', books: [], consensusSpread: 0, consensusTotal: 0, consensusMlHome: 0, consensusMlAway: 0 },
+      current: { time: '', books: [], consensusSpread: 0, consensusTotal: 0, consensusMlHome: 0, consensusMlAway: 0 },
       spreadMovement: 0, totalMovement: 0, spreadDirection: 'stable', totalDirection: 'stable',
+      mlHomeMovement: 0, mlAwayMovement: 0, mlDirection: 'stable',
       velocityPerHour: 0, maxBookDisagreement: 0, timeline: [],
       sharpIndicators: { steamMove: false, steamDetail: null, frozenLine: false, crossedKeyNumber: false, keyNumbersNear: [] },
       totalSharpIndicators: { totalSteamMove: false, totalSteamDetail: null, totalSteamDirection: null, frozenTotal: false, totalVelocityPerHour: 0, highestTotalSeen: 0, lowestTotalSeen: 0, totalBookDisagreement: 0 },
@@ -454,6 +478,10 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   const openingTotals = openingBooks.filter((b) => b.total !== 0);
   const openingConsensusSpread = mode(openingSpreads.map((b) => b.spread));
   const openingConsensusTotal = mode(openingTotals.map((b) => b.total));
+  const openingMlHomes = openingBooks.filter((b) => b.mlHome !== 0 && b.mlHome != null);
+  const openingMlAways = openingBooks.filter((b) => b.mlAway !== 0 && b.mlAway != null);
+  const openingConsensusMlHome = openingMlHomes.length ? mode(openingMlHomes.map((b) => b.mlHome)) : 0;
+  const openingConsensusMlAway = openingMlAways.length ? mode(openingMlAways.map((b) => b.mlAway)) : 0;
 
   const currentByBook: Record<string, OddsSnapshot> = {};
   for (const s of sorted) {
@@ -464,9 +492,27 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   const currentTotalsValid = currentBooks.filter((b) => b.total !== 0);
   const currentConsensusSpread = mode(currentSpreadsValid.map((b) => b.spread));
   const currentConsensusTotal = mode(currentTotalsValid.map((b) => b.total));
+  const currentMlHomes = currentBooks.filter((b) => b.mlHome !== 0 && b.mlHome != null);
+  const currentMlAways = currentBooks.filter((b) => b.mlAway !== 0 && b.mlAway != null);
+  const currentConsensusMlHome = currentMlHomes.length ? mode(currentMlHomes.map((b) => b.mlHome)) : 0;
+  const currentConsensusMlAway = currentMlAways.length ? mode(currentMlAways.map((b) => b.mlAway)) : 0;
 
   const spreadMovement = currentConsensusSpread - openingConsensusSpread;
   const totalMovement = currentConsensusTotal - openingConsensusTotal;
+
+  // Moneyline movement (critical for MLB signal detection)
+  const mlHomeMovement = (openingConsensusMlHome !== 0 && currentConsensusMlHome !== 0)
+    ? currentConsensusMlHome - openingConsensusMlHome : 0;
+  const mlAwayMovement = (openingConsensusMlAway !== 0 && currentConsensusMlAway !== 0)
+    ? currentConsensusMlAway - openingConsensusMlAway : 0;
+
+  // ML direction: if home ML gets more negative, home is being bet (favorite strengthening)
+  // If away ML gets less positive, away is being bet (underdog shortening)
+  const mlDirection =
+    (Math.abs(mlHomeMovement) < 3 && Math.abs(mlAwayMovement) < 3) ? 'stable'
+      : mlHomeMovement < 0 ? 'toward home favorite (ML shortening)'
+        : mlHomeMovement > 0 ? 'toward away / home underdog (home ML drifting)'
+          : 'stable';
 
   const spreadDirection =
     Math.abs(spreadMovement) < 0.5 ? 'stable'
@@ -581,9 +627,9 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
 
   return {
     snapshotCount: snapshots.length, trackingHours, books,
-    opening: { time: firstTime, books: openingBooks, consensusSpread: openingConsensusSpread, consensusTotal: openingConsensusTotal },
-    current: { time: lastTime, books: currentBooks, consensusSpread: currentConsensusSpread, consensusTotal: currentConsensusTotal },
-    spreadMovement, totalMovement, spreadDirection, totalDirection, velocityPerHour, maxBookDisagreement, timeline,
+    opening: { time: firstTime, books: openingBooks, consensusSpread: openingConsensusSpread, consensusTotal: openingConsensusTotal, consensusMlHome: openingConsensusMlHome, consensusMlAway: openingConsensusMlAway },
+    current: { time: lastTime, books: currentBooks, consensusSpread: currentConsensusSpread, consensusTotal: currentConsensusTotal, consensusMlHome: currentConsensusMlHome, consensusMlAway: currentConsensusMlAway },
+    spreadMovement, totalMovement, spreadDirection, totalDirection, mlHomeMovement, mlAwayMovement, mlDirection, velocityPerHour, maxBookDisagreement, timeline,
     sharpIndicators: { steamMove, steamDetail, frozenLine, crossedKeyNumber, keyNumbersNear },
     totalSharpIndicators: { totalSteamMove, totalSteamDetail, totalSteamDirection, frozenTotal, totalVelocityPerHour, highestTotalSeen, lowestTotalSeen, totalBookDisagreement },
   };
@@ -979,46 +1025,87 @@ function buildHsaUserMessage(
   splits?: { homeBetsPct: number; awayBetsPct: number; homeMoneyPct: number; awayMoneyPct: number; numBets: number } | null,
   totalsSplits?: { overTicketPct: number; underTicketPct: number; overMoneyPct: number; underMoneyPct: number } | null,
 ): string {
+  const isMLB = league === 'MLB';
+
   const timelineStr = summary.timeline
-    .map((t) => `${t.label}: spread ${t.consensusSpread} | total ${t.consensusTotal} [${t.books.map((b) => `${b.book}: ${b.spread}/${b.total}`).join(', ')}]`)
+    .map((t) => `${t.label}: spread ${t.consensusSpread} | total ${t.consensusTotal} [${t.books.map((b) => `${b.book}: spr=${b.spread}/tot=${b.total}/ML=${b.mlHome}/${b.mlAway}`).join(', ')}]`)
     .join('\n');
 
   const currentBooksStr = summary.current.books
-    .map((b) => `${b.book}: spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice}) | ML ${b.mlHome}/${b.mlAway}`)
+    .map((b) => `${b.book}: ML ${b.mlHome}/${b.mlAway} | spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice})`)
     .join('\n');
 
   const openingBooksStr = summary.opening.books
-    .map((b) => `${b.book}: spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice}) | ML ${b.mlHome}/${b.mlAway}`)
+    .map((b) => `${b.book}: ML ${b.mlHome}/${b.mlAway} | spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice})`)
     .join('\n');
 
-  const homeFavored = summary.current.consensusSpread < 0;
+  // For MLB, determine favorite by moneyline (not spread, which is always ±1.5)
+  const homeFavored = isMLB
+    ? (summary.current.consensusMlHome < 0 && summary.current.consensusMlHome < summary.current.consensusMlAway)
+    : summary.current.consensusSpread < 0;
   const favoriteTeam = homeFavored ? homeTeam : awayTeam;
   const underdogTeam = homeFavored ? awayTeam : homeTeam;
   const currentAbsSpread = Math.abs(summary.current.consensusSpread);
+
+  // MLB moneyline per-book movement detail
+  let mlbMoneylineSection = '';
+  if (isMLB) {
+    const mlPerBook: string[] = [];
+    for (const cb of summary.current.books) {
+      const ob = summary.opening.books.find(o => o.book === cb.book);
+      if (!ob) continue;
+      const homeMove = cb.mlHome - ob.mlHome;
+      const awayMove = cb.mlAway - ob.mlAway;
+      const moved = Math.abs(homeMove) >= 3 || Math.abs(awayMove) >= 3;
+      mlPerBook.push(`  ${cb.book}: ${homeTeam} ML ${ob.mlHome} → ${cb.mlHome} (${homeMove >= 0 ? '+' : ''}${homeMove}) | ${awayTeam} ML ${ob.mlAway} → ${cb.mlAway} (${awayMove >= 0 ? '+' : ''}${awayMove}) ${moved ? '[MOVED]' : '[HELD]'}`);
+    }
+    mlbMoneylineSection = `
+=== MLB MONEYLINE DETAIL (PRIMARY SIGNAL MARKET) ===
+IMPORTANT: In MLB, the moneyline is the primary signal market, NOT the run line.
+The run line (±1.5) rarely moves in MLB — moneyline movement IS the signal.
+If moneyline moved but run line did not, the market DID move. Do NOT say "static board."
+
+Opening ML consensus: ${homeTeam} ${summary.opening.consensusMlHome} / ${awayTeam} ${summary.opening.consensusMlAway}
+Current ML consensus: ${homeTeam} ${summary.current.consensusMlHome} / ${awayTeam} ${summary.current.consensusMlAway}
+ML movement: ${homeTeam} ${summary.mlHomeMovement >= 0 ? '+' : ''}${summary.mlHomeMovement} | ${awayTeam} ${summary.mlAwayMovement >= 0 ? '+' : ''}${summary.mlAwayMovement} (${summary.mlDirection})
+
+PER-BOOK MONEYLINE MOVEMENT:
+${mlPerBook.join('\n')}
+`;
+  }
+
+  // MLB-specific market priority instruction
+  const marketPriorityNote = isMLB
+    ? `\nMLB MARKET PRIORITY: Evaluate markets in this order: 1) Moneyline 2) Total 3) Run line.
+The run line in MLB is almost always ±1.5 and rarely moves. Do NOT anchor your analysis on the run line.
+If moneyline shows meaningful movement (≥5 cents) and run line is flat, the market HAS moved.
+A 15-cent ML move (e.g. +115 → +100) is significant. A flat run line does not negate ML movement.
+SPREAD CONVENTION: In MLB, "spread" = run line (±1.5). All values from ${homeTeam} (HOME) perspective.\n`
+    : `\nSPREAD CONVENTION: All spreads are from ${homeTeam} (HOME) perspective. Negative = ${homeTeam} favored.\n`;
 
   return `Analyze this game's market behavior and return the HSA structured analysis.
 
 GAME: ${awayTeam} @ ${homeTeam}
 LEAGUE: ${league}
 GAME TIME: ${gameTime}
-
-SPREAD CONVENTION: All spreads are from ${homeTeam} (HOME) perspective. Negative = ${homeTeam} favored.
-CURRENT MARKET: ${favoriteTeam} favored by ${currentAbsSpread}. ${underdogTeam} is the underdog at +${currentAbsSpread}.
-
+${marketPriorityNote}
+CURRENT MARKET: ${favoriteTeam} favored${isMLB ? ` (ML ${homeFavored ? summary.current.consensusMlHome : summary.current.consensusMlAway})` : ` by ${currentAbsSpread}`}. ${underdogTeam} is the underdog${isMLB ? ` (ML ${homeFavored ? summary.current.consensusMlAway : summary.current.consensusMlHome})` : ` at +${currentAbsSpread}`}.
+${mlbMoneylineSection}
 === MARKET DATA ===
 Tracking: ${summary.snapshotCount} snapshots over ${summary.trackingHours} hours
 Books: ${summary.books.join(', ')}
 
 OPENING LINES:
 ${openingBooksStr}
-Consensus: spread ${summary.opening.consensusSpread} | total ${summary.opening.consensusTotal}
+Consensus: spread ${summary.opening.consensusSpread} | total ${summary.opening.consensusTotal} | ML ${summary.opening.consensusMlHome}/${summary.opening.consensusMlAway}
 
 CURRENT LINES:
 ${currentBooksStr}
-Consensus: spread ${summary.current.consensusSpread} | total ${summary.current.consensusTotal}
+Consensus: spread ${summary.current.consensusSpread} | total ${summary.current.consensusTotal} | ML ${summary.current.consensusMlHome}/${summary.current.consensusMlAway}
 
 MOVEMENT:
-Spread: ${summary.spreadMovement > 0 ? '+' : ''}${summary.spreadMovement} (${summary.spreadDirection})
+${isMLB ? `Moneyline: ${homeTeam} ${summary.mlHomeMovement >= 0 ? '+' : ''}${summary.mlHomeMovement} / ${awayTeam} ${summary.mlAwayMovement >= 0 ? '+' : ''}${summary.mlAwayMovement} (${summary.mlDirection})
+` : ''}Spread: ${summary.spreadMovement > 0 ? '+' : ''}${summary.spreadMovement} (${summary.spreadDirection})
 Total: ${summary.totalMovement > 0 ? '+' : ''}${summary.totalMovement} (${summary.totalDirection})
 Velocity: ${summary.velocityPerHour} pts/hr
 Max book disagreement: ${summary.maxBookDisagreement} pts
