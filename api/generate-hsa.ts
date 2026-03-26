@@ -1826,6 +1826,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('Insert error:', insertError.message);
     }
 
+    // MLB debug: primary market selection and per-market deltas
+    let mlbDebug: Record<string, unknown> | undefined;
+    if (league === 'MLB') {
+      const mlDelta = Math.abs(summary.mlHomeMovement);
+      const totalDelta = Math.abs(summary.totalMovement);
+      const rlDelta = Math.abs(summary.spreadMovement);
+
+      let primaryMarket: string;
+      let primaryReason: string;
+      if (mlDelta >= 5) {
+        primaryMarket = 'moneyline';
+        primaryReason = `ML moved ${mlDelta} cents (≥5 threshold)`;
+      } else if (totalDelta >= 0.5) {
+        primaryMarket = 'total';
+        primaryReason = `Total moved ${totalDelta} pts, ML only ${mlDelta} cents`;
+      } else if (rlDelta >= 0.5) {
+        primaryMarket = 'runline';
+        primaryReason = `Run line moved ${rlDelta}, ML ${mlDelta}c, total ${totalDelta}`;
+      } else {
+        primaryMarket = 'none';
+        primaryReason = `No meaningful movement: ML ${mlDelta}c, total ${totalDelta}, RL ${rlDelta}`;
+      }
+
+      mlbDebug = {
+        primary_market_selected: primaryMarket,
+        reason_primary_market_selected: primaryReason,
+        ml_open_consensus: summary.opening.consensusMlHome,
+        ml_current_consensus: summary.current.consensusMlHome,
+        ml_delta: summary.mlHomeMovement,
+        ml_away_open: summary.opening.consensusMlAway,
+        ml_away_current: summary.current.consensusMlAway,
+        ml_away_delta: summary.mlAwayMovement,
+        total_open_consensus: summary.opening.consensusTotal,
+        total_current_consensus: summary.current.consensusTotal,
+        total_delta: summary.totalMovement,
+        runline_open_consensus: summary.opening.consensusSpread,
+        runline_current_consensus: summary.current.consensusSpread,
+        runline_delta: summary.spreadMovement,
+        per_book_ml: summary.current.books.map(b => {
+          const ob = summary.opening.books.find(o => o.book === b.book);
+          return {
+            book: b.book,
+            ml_home_open: ob?.mlHome ?? null,
+            ml_home_current: b.mlHome,
+            ml_home_delta: ob ? b.mlHome - ob.mlHome : null,
+            ml_away_open: ob?.mlAway ?? null,
+            ml_away_current: b.mlAway,
+            ml_away_delta: ob ? b.mlAway - ob.mlAway : null,
+          };
+        }),
+      };
+      console.log(`[HSA MLB DEBUG] Primary market: ${primaryMarket} — ${primaryReason}`);
+    }
+
     return res.status(200).json({
       narrative,
       cached: false,
@@ -1843,6 +1897,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         total: lifecycle.total ? marketAnalysisSummary(lifecycle.total) : null,
         moneyline: lifecycle.moneyline ? marketAnalysisSummary(lifecycle.moneyline) : null,
       },
+      // MLB debug fields (only present for MLB games)
+      ...(mlbDebug ? { mlb_debug: mlbDebug } : {}),
       input_tokens: response.usage?.input_tokens,
       output_tokens: response.usage?.output_tokens,
     });
