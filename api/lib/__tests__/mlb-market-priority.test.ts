@@ -102,8 +102,12 @@ function computeMlbDebug(openingSnaps: MockSnapshot[], currentSnaps: MockSnapsho
   const totalOpenConsensus = mode(openBooks.filter(b => b.total > 0).map(b => b.total));
   const totalCurrConsensus = mode(currBooks.filter(b => b.total > 0).map(b => b.total));
   const totalDelta = Math.abs(totalCurrConsensus - totalOpenConsensus);
-  const rlOpenConsensus = mode(openBooks.filter(b => b.spread !== 0).map(b => b.spread));
-  const rlCurrConsensus = mode(currBooks.filter(b => b.spread !== 0).map(b => b.spread));
+
+  // MLB run line normalization: ±1.5 is structural, not directional.
+  // Normalize to absolute value before computing consensus.
+  const normalizeRl = (spread: number) => Math.abs(spread) === 1.5 ? 1.5 : spread;
+  const rlOpenConsensus = mode(openBooks.filter(b => b.spread !== 0).map(b => normalizeRl(b.spread)));
+  const rlCurrConsensus = mode(currBooks.filter(b => b.spread !== 0).map(b => normalizeRl(b.spread)));
   const rlDelta = Math.abs(rlCurrConsensus - rlOpenConsensus);
 
   let primaryMarket: string;
@@ -343,6 +347,90 @@ console.log('\n=== Scenario G: PIT @ NYM (real case) ===');
   console.log(`  → PIT@NYM: ML delta=${result.mlDelta}c, primary=${result.primaryMarket}`);
   console.log(`  → Home ML: ${result.mlOpenHome} → ${result.mlCurrHome}`);
   console.log(`  → Away ML: ${result.mlOpenAway} → ${result.mlCurrAway}`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SCENARIO H: Run line ±1.5 sign difference must NOT trigger movement
+//  Books report +1.5 and -1.5 for different team perspectives — same line
+// ══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== Scenario H: RL sign difference is NOT movement ===');
+{
+  // Some books show home as -1.5 (favorite), others as +1.5 (underdog perspective)
+  // After normalization, all should be 1.5 — no movement
+  const open = [
+    snap('draftkings', -120, +100, -1.5, 6.5, '2026-03-25T22:00:00Z'),
+    snap('fanduel',    -120, +100, -1.5, 6.5, '2026-03-25T22:00:00Z'),
+    snap('espnbet',   -125, +105, 1.5,  6.5, '2026-03-25T22:00:00Z'),  // opposite sign!
+    snap('pinnacle',  -112, +100, 1.5,  7,   '2026-03-25T22:00:00Z'),  // opposite sign!
+  ];
+  const curr = [
+    snap('draftkings', -120, +100, -1.5, 6.5, '2026-03-26T16:00:00Z'),
+    snap('fanduel',    -120, +100, -1.5, 6.5, '2026-03-26T16:00:00Z'),
+    snap('espnbet',   -125, +105, 1.5,  6.5, '2026-03-26T16:00:00Z'),
+    snap('pinnacle',  -112, +100, 1.5,  7,   '2026-03-26T16:00:00Z'),
+  ];
+
+  const result = computeMlbDebug(open, curr);
+  assertEqual(result.rlDelta, 0, 'H1: RL delta is 0 (sign difference is not movement)');
+  assertEqual(result.primaryMarket, 'none', 'H2: No primary market (nothing actually moved)');
+  assert(result.mlDelta < 5, 'H3: ML did not move either');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SCENARIO I: RL static at ±1.5 but ML moves → ML must be primary
+// ══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== Scenario I: RL static, ML moves → ML is primary ===');
+{
+  const open = [
+    snap('draftkings', -135, +115, -1.5, 6.5, '2026-03-25T22:00:00Z'),
+    snap('fanduel',    -130, +110, 1.5,  6.5, '2026-03-25T22:00:00Z'),  // opposite sign
+    snap('betmgm',    -135, +115, -1.5, 6.5, '2026-03-25T22:00:00Z'),
+    snap('espnbet',   -140, +120, 1.5,  6.5, '2026-03-25T22:00:00Z'),  // opposite sign
+    snap('pinnacle',  -128, +108, -1.5, 7,   '2026-03-25T22:00:00Z'),
+  ];
+  const curr = [
+    snap('draftkings', -120, +100, -1.5, 6.5, '2026-03-26T16:00:00Z'),
+    snap('fanduel',    -116, +100, 1.5,  6.5, '2026-03-26T16:00:00Z'),  // still opposite sign
+    snap('betmgm',    -120, +100, -1.5, 6.5, '2026-03-26T16:00:00Z'),
+    snap('espnbet',   -125, +105, 1.5,  6.5, '2026-03-26T16:00:00Z'),  // still opposite sign
+    snap('pinnacle',  -112, +100, -1.5, 7,   '2026-03-26T16:00:00Z'),
+  ];
+
+  const result = computeMlbDebug(open, curr);
+  assertEqual(result.primaryMarket, 'moneyline', 'I1: ML is primary despite mixed RL signs');
+  assertEqual(result.rlDelta, 0, 'I2: RL delta is 0 (±1.5 sign difference is structural)');
+  assert(result.mlDelta >= 10, `I3: ML delta (${result.mlDelta}) shows real movement`);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SCENARIO J: PIT @ NYM validation — no false RL movement signal
+// ══════════════════════════════════════════════════════════════════════════════
+
+console.log('\n=== Scenario J: PIT@NYM — no false RL signal ===');
+{
+  // DK/BetMGM/FanDuel have -1.5, ESPNBet/Pinnacle have +1.5
+  // This is NOT a flip or disagreement — it's the same ±1.5 run line
+  const open = [
+    snap('draftkings', -120, +100, -1.5, 6.5, '2026-03-26T06:00:00Z'),
+    snap('betmgm',    -120, +100, -1.5, 6.5, '2026-03-26T06:00:00Z'),
+    snap('fanduel',    -116, +100, -1.5, 6.5, '2026-03-26T06:00:00Z'),
+    snap('espnbet',   -125, +105, 1.5,  6.5, '2026-03-26T06:00:00Z'),
+    snap('pinnacle',  -112, +100, 1.5,  7,   '2026-03-26T06:00:00Z'),
+  ];
+  const curr = [
+    snap('draftkings', -120, +100, -1.5, 6.5, '2026-03-26T16:00:00Z'),
+    snap('betmgm',    -120, +100, -1.5, 6.5, '2026-03-26T16:00:00Z'),
+    snap('fanduel',    -116, +100, -1.5, 6.5, '2026-03-26T16:00:00Z'),
+    snap('espnbet',   -125, +105, 1.5,  6.5, '2026-03-26T16:00:00Z'),
+    snap('pinnacle',  -112, +100, 1.5,  7,   '2026-03-26T16:00:00Z'),
+  ];
+
+  const result = computeMlbDebug(open, curr);
+  assertEqual(result.rlDelta, 0, 'J1: No RL movement (±1.5 is structural)');
+  assertEqual(result.mlDelta, 0, 'J2: ML also static in this case');
+  assertEqual(result.primaryMarket, 'none', 'J3: No false signal from RL sign disagreement');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

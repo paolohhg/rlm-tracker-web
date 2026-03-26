@@ -175,13 +175,24 @@ function classifyOddsRow(
       skipReason = `spread ${row.spread} exceeds ${league} max ${spreadBounds.max}`;
     }
 
+    // MLB run line normalization: the run line is structurally ±1.5.
+    // Different books may report +1.5 or -1.5 for the same home team
+    // depending on which team they list as favorite. This is NOT movement.
+    // Normalize: always store the absolute value (1.5) for MLB run lines
+    // to prevent false "3-point moves" or "consensus flips."
+    let normalizedSpread = row.spread;
+    if (league === 'MLB' && absSpread === 1.5) {
+      // Use absolute value — sign differences are team-side perspective, not movement
+      normalizedSpread = 1.5;
+    }
+
     results.push({
       eventId, sport, book, bookType,
       marketType: 'spread',
       period: 'full_game',
       betType: 'main',
       side: 'home',
-      line: row.spread,
+      line: normalizedSpread,
       price: row.spread_home_price,
       timestamp,
       sourceLabel: `${book} spread ${row.spread}`,
@@ -1298,7 +1309,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...raw,
         total: (totalClassified && totalClassified.usable) ? raw.total : 0,
         total_over_price: (totalClassified && totalClassified.usable) ? raw.total_over_price : 0,
-        spread: (spreadClassified && spreadClassified.usable) ? raw.spread : 0,
+        // Use the normalized spread from classification (handles MLB ±1.5 normalization)
+        spread: (spreadClassified && spreadClassified.usable) ? (spreadClassified.line ?? raw.spread) : 0,
         spread_home_price: (spreadClassified && spreadClassified.usable) ? raw.spread_home_price : 0,
       };
     });
@@ -1687,13 +1699,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // ── MLB Truth Layer ────────────────────────────────────────────
+    // For MLB games, build the canonical truth object and inject it
+    // as the authoritative data source for the HSA writer.
+    let mlbTruthBlock = '';
+    let mlbTruth: import('./lib/mlb-truth-layer/types').MlbTruthObject | null = null;
+    if (league === 'MLB') {
+      try {
+        const { buildMLBTruthObject, buildMLBHSAInput, buildBlockedOutput } = await import('./lib/mlb-truth-layer');
+        mlbTruth = buildMLBTruthObject(
+          cleanSnapshots as any,
+          home_team, away_team, game_time,
+          undefined, // pitchers — TODO: fetch from ESPN
+          splitsData ? {
+            home_ticket_pct: splitsData.homeBetsPct,
+            away_ticket_pct: splitsData.awayBetsPct,
+            home_money_pct: splitsData.homeMoneyPct,
+            away_money_pct: splitsData.awayMoneyPct,
+          } : undefined,
+        );
+
+        if (!mlbTruth.validation.is_valid) {
+          console.error(`[HSA MLB] Truth validation failed:`, mlbTruth.validation.errors);
+          return res.status(200).json({
+            narrative: buildBlockedOutput(mlbTruth),
+            cached: false,
+            snapshot_count: summary.snapshotCount,
+            tracking_hours: summary.trackingHours,
+            status_tag: 'PASS',
+            market_lean: 'PASS',
+            confidence: 'Low',
+            mlb_truth: mlbTruth,
+          });
+        }
+
+        mlbTruthBlock = buildMLBHSAInput(mlbTruth);
+        console.log(`[HSA MLB] Truth: regime=${mlbTruth.derived_truth.market_regime}, side=${mlbTruth.signal_summary.side.type}(${mlbTruth.signal_summary.side.confidence}), total=${mlbTruth.signal_summary.total.type}(${mlbTruth.signal_summary.total.confidence})`);
+      } catch (err: any) {
+        console.error('[HSA MLB] Truth layer failed (non-fatal):', err.message);
+      }
+    }
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context, coordination intel, lean directive, confidence directive, and NHL classification
+    // Append lifecycle context, coordination intel, lean directive, confidence directive, MLB truth, and NHL classification
     const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock
       + (leanDirective ? '\n\n' + leanDirective : '')
       + (confidenceDirective ? '\n\n' + confidenceDirective : '')
+      + (mlbTruthBlock ? '\n\n' + mlbTruthBlock : '')
       + (nhlClassificationBlock ? '\n\n' + nhlClassificationBlock : '');
 
     // Retry Anthropic API up to 2 times with exponential backoff
@@ -1799,6 +1853,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const totalsCurrent = summary.current.consensusTotal;
     const totalsMove = totalsCurrent - totalsOpen;
 
+    // ── MLB Post-write verification ──────────────────────────────
+    // Compare written HSA against canonical truth object. Log violations.
+    let mlbVerification: any = undefined;
+    if (mlbTruth && league === 'MLB') {
+      try {
+        const { verifyGeneratedMLBHSA } = await import('./lib/mlb-truth-layer');
+        const verification = verifyGeneratedMLBHSA(narrative, mlbTruth);
+        mlbVerification = verification;
+        if (!verification.passed) {
+          console.error(`[HSA MLB VERIFY] VIOLATIONS:`, verification.violations);
+        }
+        if (verification.warnings.length > 0) {
+          console.warn(`[HSA MLB VERIFY] Warnings:`, verification.warnings);
+        }
+      } catch (err: any) {
+        console.error('[HSA MLB VERIFY] Verification failed:', err.message);
+      }
+    }
+
     // Store in claude_analyses
     const { error: insertError } = await supabase.from('claude_analyses').insert({
       league,
@@ -1885,6 +1958,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       // MLB debug fields (only present for MLB games)
       ...(mlbDebug ? { mlb_debug: mlbDebug } : {}),
+      ...(mlbTruth ? { mlb_truth: { derived_truth: mlbTruth.derived_truth, signal_summary: mlbTruth.signal_summary, validation: mlbTruth.validation } } : {}),
+      ...(mlbVerification ? { mlb_verification: mlbVerification } : {}),
       input_tokens: response.usage?.input_tokens,
       output_tokens: response.usage?.output_tokens,
     });

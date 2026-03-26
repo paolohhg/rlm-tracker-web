@@ -118,17 +118,19 @@ const NHL_MONEYLINE: MarketThresholds = {
 };
 
 // ── MLB ──────────────────────────────────────────────────────────────────────
-// MLB is ML-primary. Run lines at ±1.5.
+// MLB is ML-primary. Run line is structurally ±1.5 and almost never moves.
+// High thresholds prevent false signals from sign-perspective differences.
+// Real MLB signals come from moneyline, not run line.
 
 const MLB_SPREAD: MarketThresholds = {
-  meaningful_move: 0.3,
-  steam_move: 0.5,
+  meaningful_move: 1.0,    // Run line rarely moves; needs full-point shift to be meaningful
+  steam_move: 1.5,         // Only a true alt-line shift qualifies as steam
   frozen_threshold: 0.1,
-  reversal_threshold: 0.3,
+  reversal_threshold: 0.5,
   steam_window_minutes: 20,
   min_books_steam: 3,
   key_numbers: [1.5],
-  disagreement_threshold: 0.5,
+  disagreement_threshold: 1.0,  // ±1.5 sign difference is NOT disagreement
 };
 
 const MLB_TOTAL: MarketThresholds = {
