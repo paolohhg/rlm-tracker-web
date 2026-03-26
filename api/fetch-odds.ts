@@ -19,7 +19,7 @@ const LEAGUES = [
 const BOOKMAKERS = 'draftkings,fanduel,betmgm,pinnacle,caesars,pointsbetus,espnbet';
 
 function marketsForLeague(league: string): string {
-  if (league === 'MLB') return 'spreads,h2h,totals,alternate_runlines';
+  if (league === 'MLB') return 'spreads,h2h,totals';
   if (league === 'NHL') return 'h2h,totals,spreads';
   return 'spreads,h2h,totals';
 }
