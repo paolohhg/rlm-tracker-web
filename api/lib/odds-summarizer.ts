@@ -111,9 +111,33 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+/** Map raw lowercase bookmaker keys to proper display names */
+const BOOK_DISPLAY_NAMES: Record<string, string> = {
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  betmgm: 'BetMGM',
+  pinnacle: 'Pinnacle',
+  espnbet: 'ESPNBet',
+  caesars: 'Caesars',
+  pointsbetus: 'PointsBet',
+  circa: 'Circa',
+  bookmaker: 'Bookmaker',
+  heritage: 'Heritage',
+  betrivers: 'BetRivers',
+  unibet: 'Unibet',
+  wynnbet: 'WynnBET',
+  superbook: 'SuperBook',
+  hardrock: 'Hard Rock',
+  fanatics: 'Fanatics',
+};
+
+function displayBookName(raw: string): string {
+  return BOOK_DISPLAY_NAMES[raw.toLowerCase()] || raw;
+}
+
 function toBookLine(snap: OddsSnapshot): BookLine {
   return {
-    book: snap.bookmaker,
+    book: displayBookName(snap.bookmaker),
     spread: snap.spread,
     spreadPrice: snap.spread_home_price,
     total: snap.total,
@@ -171,7 +195,7 @@ export function summarizeOdds(
     (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
   );
 
-  const books = [...new Set(sorted.map((s) => s.bookmaker))];
+  const books = [...new Set(sorted.map((s) => displayBookName(s.bookmaker)))];
   const firstTime = sorted[0].fetched_at;
   const lastTime = sorted[sorted.length - 1].fetched_at;
   const trackingHours = round1(minutesBetween(firstTime, lastTime) / 60);
@@ -202,8 +226,8 @@ export function summarizeOdds(
     Math.abs(spreadMovement) < 0.5
       ? 'stable'
       : spreadMovement < 0
-        ? 'toward home favorite'
-        : 'toward away / home underdog';
+        ? 'toward home'
+        : 'toward away';
 
   const totalDirection =
     Math.abs(totalMovement) < 0.5

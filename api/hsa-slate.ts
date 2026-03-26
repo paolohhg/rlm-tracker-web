@@ -174,12 +174,37 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+/** Map raw lowercase bookmaker keys to proper display names */
+const BOOK_DISPLAY_NAMES: Record<string, string> = {
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  betmgm: 'BetMGM',
+  pinnacle: 'Pinnacle',
+  espnbet: 'ESPNBet',
+  caesars: 'Caesars',
+  pointsbetus: 'PointsBet',
+  circa: 'Circa',
+  bookmaker: 'Bookmaker',
+  heritage: 'Heritage',
+  betrivers: 'BetRivers',
+  unibet: 'Unibet',
+  wynnbet: 'WynnBET',
+  superbook: 'SuperBook',
+  hardrock: 'Hard Rock',
+  fanatics: 'Fanatics',
+};
+
+function displayBookName(raw: string): string {
+  return BOOK_DISPLAY_NAMES[raw.toLowerCase()] || raw;
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const leagueFilter = req.query.league as string | undefined;
     const dateFilter = req.query.date as string | undefined;
+    const daysAhead = parseInt(req.query.days as string || '0', 10);
     const includeLive = req.query.include_live === 'true';
     const refreshOdds = req.query.refresh_odds === 'true';
 
@@ -217,6 +242,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (dateFilter) {
       slateStart = `${dateFilter}T00:00:00Z`;
       slateEnd = `${dateFilter}T23:59:59Z`;
+    } else if (daysAhead > 0) {
+      // Multi-day window: today through N days ahead
+      const todayStr = now.toISOString().split('T')[0];
+      slateStart = `${todayStr}T00:00:00Z`;
+      slateEnd = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
     } else {
       const todayStr = now.toISOString().split('T')[0];
       slateStart = `${todayStr}T00:00:00Z`;
@@ -292,7 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const currentBooks: BookLine[] = Object.entries(currentByBook).map(([book, s]) => ({
-        book,
+        book: displayBookName(book),
         spread: s.spread,
         spread_price: s.spread_home_price,
         total: s.total,

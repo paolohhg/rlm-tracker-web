@@ -111,11 +111,36 @@ Describe what the market is doing, not what someone should do.
 The Public Bias field MUST always contain "Sharp side:" with an explicit conclusion. Vague descriptions of public percentages without a sharp-side verdict are not acceptable.
 The Market Lean field MUST always name a specific team + number, Over/Under + number, or PASS. Never leave it directionally ambiguous.
 
+CRITICAL TEAM/SPREAD PAIRING RULE
+All spreads are from the HOME team's perspective. When writing Market Lean or any team + spread:
+- The HOME team's spread is the number shown in the data (e.g. if home spread is +2.5, the home team is the underdog at +2.5)
+- The AWAY team's spread is the OPPOSITE sign (e.g. if home spread is +2.5, the away team is the favorite at -2.5)
+- NEVER pair the away team name with the home team's spread number
+- If a MARKET LEAN DIRECTIVE section is provided, you MUST use that exact lean verbatim
+- Example: if Home=Dallas spread is +2.5 and Away=Warriors, then Dallas is +2.5 underdog and Warriors are -2.5 favorite. Writing "Warriors +2.5" is WRONG.
+
 CRITICAL SPORTSBOOK ATTRIBUTION RULE
 Every section that discusses line movement MUST name exact sportsbooks.
 Never write generic phrases like "books moved", "multiple sportsbooks", "sportsbooks coordinated", or "market shifted".
 Always write: "[BookName], [BookName], and [BookName] moved X → Y within Z minutes, while [BookName] held X."
-Use the BOOK COORDINATION INTEL section provided in the input data as your source of truth for which books moved, held, led, and followed.`;
+Use the BOOK COORDINATION INTEL section provided in the input data as your source of truth for which books moved, held, led, and followed.
+
+NHL-SPECIFIC RULES
+When analyzing NHL games, follow these additional rules:
+
+1. PUCK-LINE STATE FLIPS: NHL puck lines are state-based around 1.5. A move from -1.5 to +1.5 is a STATE FLIP, NOT a "3-point spread move." Never describe puck-line flips using point-based language. Instead say: "The puck line flipped state from favorite to underdog pricing" or "The market flipped the puck-line state, but broad confirmation is still incomplete."
+
+2. FORBIDDEN NHL LANGUAGE (unless truly earned):
+- "3-point steam" or any numeric point description for a puck-line flip
+- "high confidence steam" with only 2 books moving
+- "market-wide confirmation" when books are split
+- "strong sharp signal" if fake steam is active
+
+3. SIGNAL PRIORITY FOR NHL SIDES: Moneyline > Public divergence > Book coordination > Puck line > Total > Velocity. If only the puck line is chaotic but moneyline is stable, treat puck-line movement as weak unless broader confirmation exists.
+
+4. COORDINATION THRESHOLDS: 1 book = isolated (never call steam), 2 books = partial (never call confirmed steam), 3 books = meaningful coordination, 4+ books = strong confirmation.
+
+5. If an NHL MARKET CLASSIFICATION section is provided in the input, you MUST respect its signal_type, confidence, and status values. Do not override the pre-computed classification with your own interpretation.`;
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -350,9 +375,32 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+/** Map raw lowercase bookmaker keys to proper display names */
+const BOOK_DISPLAY_NAMES: Record<string, string> = {
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  betmgm: 'BetMGM',
+  pinnacle: 'Pinnacle',
+  espnbet: 'ESPNBet',
+  caesars: 'Caesars',
+  pointsbetus: 'PointsBet',
+  circa: 'Circa',
+  bookmaker: 'Bookmaker',
+  heritage: 'Heritage',
+  betrivers: 'BetRivers',
+  unibet: 'Unibet',
+  wynnbet: 'WynnBET',
+  superbook: 'SuperBook',
+  hardrock: 'Hard Rock',
+  fanatics: 'Fanatics',
+};
+
+function displayBookName(raw: string): string {
+  return BOOK_DISPLAY_NAMES[raw.toLowerCase()] || raw;
+}
 function toBookLine(snap: OddsSnapshot): BookLine {
   return {
-    book: snap.bookmaker,
+    book: displayBookName(snap.bookmaker),
     spread: snap.spread,
     spreadPrice: snap.spread_home_price,
     total: snap.total,
@@ -392,7 +440,7 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
     (a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime()
   );
 
-  const books = [...new Set(sorted.map((s) => s.bookmaker))];
+  const books = [...new Set(sorted.map((s) => displayBookName(s.bookmaker)))];
   const firstTime = sorted[0].fetched_at;
   const lastTime = sorted[sorted.length - 1].fetched_at;
   const trackingHours = round1(minutesBetween(firstTime, lastTime) / 60);
@@ -472,7 +520,19 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
     const timeDiff = timeline[i - 1].minutesBefore - timeline[i].minutesBefore;
     if (diff >= 1 && timeDiff <= 30) {
       steamMove = true;
-      steamDetail = `${diff}-point move in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      // NHL puck-line state flip: don't describe as numeric point move
+      const prevSpread = timeline[i - 1].consensusSpread;
+      const currSpread = timeline[i].consensusSpread;
+      const isNhlPucklineFlip = league === 'NHL' && (
+        (prevSpread === -1.5 && currSpread === 1.5) ||
+        (prevSpread === 1.5 && currSpread === -1.5) ||
+        (prevSpread === -1.5 && currSpread === -1.5) === false // type guard
+      ) && Math.abs(prevSpread) === 1.5 && Math.abs(currSpread) === 1.5 && prevSpread !== currSpread;
+      if (isNhlPucklineFlip) {
+        steamDetail = `Puck-line state flip (${prevSpread} → ${currSpread}) in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      } else {
+        steamDetail = `${diff}-point move in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
+      }
       break;
     }
   }
@@ -608,7 +668,7 @@ function computeBookCoordination(
     }
 
     details.push({
-      book,
+      book: displayBookName(book),
       openLine,
       currentLine,
       move: currentLine - openLine,
@@ -1150,11 +1210,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const odds = oddsDesc ? [...oddsDesc].reverse() : null;
 
     if (oddsError) {
+      console.error('[HSA] Supabase odds query error:', JSON.stringify(oddsError));
       return res.status(500).json({
-        error: 'Failed to fetch odds',
+        error: `Failed to fetch odds: ${oddsError.message || oddsError.code || 'unknown error'}`,
         detail: oddsError.message,
         code: oddsError.code,
         hint: oddsError.hint,
+        query_params: { league, home_team, away_team, game_time, windowStart, windowEnd },
       });
     }
 
@@ -1412,11 +1474,157 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`[HSA COORD BLOCK]\n${coordBlock}`);
 
+    // ── NHL Signal Classification ─────────────────────────────────────
+    // For NHL games, run the NHL-specific classifier to prevent
+    // puck-line state flips from being described as "3-point steam moves"
+    // and to enforce proper coordination thresholds.
+    let nhlClassificationBlock = '';
+    if (league === 'NHL') {
+      try {
+        const {
+          getNhlSignalType,
+          getNhlTotalsSignalType,
+          buildNhlClassificationBlock,
+          isPucklineStateFlip,
+        } = await import('./lib/nhl-signal-classifier');
+
+        // Determine ML direction
+        const mlOpenHome = summary.opening.books.length > 0
+          ? mode(summary.opening.books.map(b => b.mlHome).filter(v => v !== 0))
+          : 0;
+        const mlCurrHome = summary.current.books.length > 0
+          ? mode(summary.current.books.map(b => b.mlHome).filter(v => v !== 0))
+          : 0;
+        const mlDelta = (mlCurrHome ?? 0) - (mlOpenHome ?? 0);
+        const mlDir = mlDelta > 5 ? 'toward_away' as const :
+                      mlDelta < -5 ? 'toward_home' as const : 'none' as const;
+
+        // Determine persistence from lifecycle data
+        const spreadLifecycle = lifecycle.spread;
+        const movePersistedSnapshots = spreadLifecycle
+          ? (spreadLifecycle.has_held_post_move ? 3 : (spreadLifecycle.current_state.holding_near_level ? 2 : 1))
+          : 1;
+        const hasSnappedBack = spreadLifecycle
+          ? (spreadLifecycle.has_retraced && spreadLifecycle.percent_of_primary_move_retraced > 50)
+          : false;
+
+        // Compute fake steam inline (can't import from src/ in Vercel API routes)
+        const currentSpreadLines = summary.current.books
+          .map(b => b.spread)
+          .filter(s => s !== 0);
+        let fakeSteamTriggered = false;
+        let fakeSteamScore = 0;
+        if (currentSpreadLines.length >= 3) {
+          const sortedLines = [...currentSpreadLines].sort((a, b) => a - b);
+          const midIdx = Math.floor(sortedLines.length / 2);
+          const medianVal = sortedLines.length % 2 === 0
+            ? (sortedLines[midIdx - 1] + sortedLines[midIdx]) / 2
+            : sortedLines[midIdx];
+          const marketRange = sortedLines[sortedLines.length - 1] - sortedLines[0];
+          const outlierCount = currentSpreadLines.filter(l => Math.abs(l - medianVal) >= 0.5).length;
+          if (marketRange >= 1.0) fakeSteamScore++;
+          if (marketRange >= 1.5) fakeSteamScore++;
+          if (outlierCount <= 1) fakeSteamScore++;
+          if (outlierCount === 1 && marketRange >= 1.0) fakeSteamScore++;
+          if (outlierCount === 0 && marketRange >= 1.0) fakeSteamScore++;
+          fakeSteamTriggered = fakeSteamScore >= 3;
+        }
+
+        const sideClassification = getNhlSignalType({
+          league,
+          homeTeam: home_team,
+          awayTeam: away_team,
+          openingSpread: summary.opening.consensusSpread,
+          currentSpread: summary.current.consensusSpread,
+          spreadBooksMovedCount: spreadCoord?.movedBooks.length ?? 0,
+          spreadBooksHeldCount: spreadCoord?.heldBooks.length ?? 0,
+          spreadBooksMoved: spreadCoord?.movedBooks.map(b => b.book) ?? [],
+          spreadBooksHeld: spreadCoord?.heldBooks.map(b => b.book) ?? [],
+          spreadMoveTimeWindowMinutes: spreadCoord?.timeWindowMinutes ?? 0,
+          openingMlHome: mlOpenHome ?? 0,
+          currentMlHome: mlCurrHome ?? 0,
+          mlBooksMovedCount: mlCoord?.movedBooks.length ?? 0,
+          mlDirection: mlDir,
+          publicTicketPctHome: splitsData?.homeBetsPct ?? 50,
+          publicMoneyPctHome: splitsData?.homeMoneyPct ?? 50,
+          openingTotal: summary.opening.consensusTotal,
+          currentTotal: summary.current.consensusTotal,
+          totalBooksMovedCount: totalCoord?.movedBooks.length ?? 0,
+          totalBooksHeldCount: totalCoord?.heldBooks.length ?? 0,
+          totalBooksMoved: totalCoord?.movedBooks.map(b => b.book) ?? [],
+          totalBooksHeld: totalCoord?.heldBooks.map(b => b.book) ?? [],
+          movePersistedSnapshots,
+          hasSnappedBack,
+          fakeSteamTriggered,
+          fakeSteamScore,
+        });
+
+        // Totals classification
+        const totalsClassification = getNhlTotalsSignalType({
+          openingTotal: summary.opening.consensusTotal,
+          currentTotal: summary.current.consensusTotal,
+          booksMovedCount: totalCoord?.movedBooks.length ?? 0,
+          booksHeldCount: totalCoord?.heldBooks.length ?? 0,
+          booksMoved: totalCoord?.movedBooks.map(b => b.book) ?? [],
+          booksHeld: totalCoord?.heldBooks.map(b => b.book) ?? [],
+        });
+
+        nhlClassificationBlock = buildNhlClassificationBlock(sideClassification, totalsClassification);
+        console.log(`[HSA NHL] Classification: ${sideClassification.signal_type} / ${sideClassification.confidence} / ${sideClassification.coordination_tier}`);
+        console.log(`[HSA NHL] Puck-line state flip: ${sideClassification.puckline_state_flip}`);
+        console.log(`[HSA NHL] Totals: ${totalsClassification.signal_type} / ${totalsClassification.confidence}`);
+
+        // Override the steam description in summary if it's a puck-line state flip
+        if (isPucklineStateFlip(summary.opening.consensusSpread, summary.current.consensusSpread)) {
+          if (summary.sharpIndicators.steamMove && summary.sharpIndicators.steamDetail) {
+            summary.sharpIndicators.steamDetail =
+              `PUCKLINE STATE FLIP (not a numeric steam move) — ${summary.sharpIndicators.steamDetail?.replace(/\d+-point move/, 'state flip')}`;
+          }
+        }
+      } catch (nhlErr: any) {
+        console.error('[HSA] NHL classification failed (non-fatal):', nhlErr.message);
+      }
+    }
+
+    // ── Pre-computed Market Lean Directive ─────────────────────────────
+    // Build an explicit lean directive from the lifecycle engine so Claude
+    // doesn't pair the wrong team with the wrong spread number.
+    // Spreads are from HOME perspective — the lean label must correctly
+    // pair the team name with THEIR spread (not the opponent's).
+    let leanDirective = '';
+    if (lifecycle.spread?.final_read.market_lean && lifecycle.spread.final_read.market_lean !== 'PASS') {
+      const spreadLean = lifecycle.spread.final_read.market_lean;
+      const totalLean = lifecycle.total?.final_read.market_lean ?? 'PASS';
+      const spreadConf = lifecycle.spread.final_read.confidence;
+
+      leanDirective = [
+        '\n=== MARKET LEAN DIRECTIVE (USE VERBATIM) ===',
+        'IMPORTANT: The market lean below was pre-computed from the lifecycle analysis.',
+        'You MUST use this EXACT team name + number in your Market Lean field.',
+        'Do NOT swap the team name or flip the spread sign.',
+        '',
+        `SPREAD LEAN: ${spreadLean}`,
+        `SPREAD CONFIDENCE: ${spreadConf}`,
+        totalLean !== 'PASS' ? `TOTAL LEAN: ${totalLean}` : '',
+        '',
+        'TEAM/SPREAD PAIRING RULE:',
+        `  Home team (${home_team}) spread: ${summary.current.consensusSpread > 0 ? '+' : ''}${summary.current.consensusSpread}`,
+        `  Away team (${away_team}) spread: ${-summary.current.consensusSpread > 0 ? '+' : ''}${-summary.current.consensusSpread}`,
+        `  If you lean toward ${home_team}, write: "${home_team} ${summary.current.consensusSpread > 0 ? '+' : ''}${summary.current.consensusSpread}"`,
+        `  If you lean toward ${away_team}, write: "${away_team} ${-summary.current.consensusSpread > 0 ? '+' : ''}${-summary.current.consensusSpread}"`,
+        '  NEVER pair the away team name with the home spread number or vice versa.',
+      ].filter(l => l !== '').join('\n');
+
+      console.log(`[HSA LEAN DIRECTIVE] ${spreadLean} (${spreadConf})`);
+    }
+
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context and coordination intel as structured sections
-    const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock;
+    // Append lifecycle context, coordination intel, lean directive, and NHL classification as structured sections
+    const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock
+      + (leanDirective ? '\n\n' + leanDirective : '')
+      + (nhlClassificationBlock ? '\n\n' + nhlClassificationBlock : '');
 
     // Retry Anthropic API up to 2 times with exponential backoff
     let response: Anthropic.Messages.Message | null = null;
@@ -1480,7 +1688,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Extract market lean from "Market Lean:" line
     const leanMatch = narrative.match(/Market Lean:\s*(.+)/i);
-    const marketLean = leanMatch?.[1]?.trim() || 'PASS';
+    let marketLean = leanMatch?.[1]?.trim() || 'PASS';
+
+    // ── Post-process: fix wrong team/spread pairing ───────────────────
+    // Claude sometimes pairs the away team name with the home spread (+)
+    // or vice versa. If the lifecycle engine computed a lean, use it as
+    // the authoritative source to correct any team/spread mismatch.
+    if (marketLean !== 'PASS' && lifecycle.spread?.final_read.market_lean &&
+        lifecycle.spread.final_read.market_lean !== 'PASS') {
+      const lifecycleLean = lifecycle.spread.final_read.market_lean;
+      const homeSpread = summary.current.consensusSpread;
+
+      // Check if Claude wrote the wrong team+number pairing
+      // e.g. "Warriors +2.5" when Warriors are actually -2.5
+      const awayWithHomeSpread = `${away_team} ${homeSpread > 0 ? '+' : ''}${homeSpread}`;
+      const homeWithAwaySpread = `${home_team} ${-homeSpread > 0 ? '+' : ''}${-homeSpread}`;
+
+      if (marketLean === awayWithHomeSpread || marketLean === homeWithAwaySpread) {
+        console.log(`[HSA LEAN FIX] Claude wrote "${marketLean}" — wrong team/spread pairing. Using lifecycle lean: "${lifecycleLean}"`);
+        marketLean = lifecycleLean;
+        // Also fix in the narrative text
+        if (leanMatch) {
+          narrative = narrative.replace(
+            /Market Lean:\s*.+/i,
+            `Market Lean: ${lifecycleLean}`
+          );
+        }
+      }
+    }
 
     // Extract confidence from "Confidence:" line
     const confMatch = narrative.match(/Confidence:\s*(Low|Moderate|High)/i);

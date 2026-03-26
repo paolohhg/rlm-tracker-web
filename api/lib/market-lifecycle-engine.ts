@@ -752,7 +752,7 @@ function buildFinalRead(
   else signalStatus = 'PASS';
 
   // Summary mode
-  const summary = buildSummaryMode(primary, current, totalMove, marketType, T);
+  const summary = buildSummaryMode(primary, current, totalMove, marketType, T, homeTeam, awayTeam);
 
   return {
     signal_status: signalStatus,
@@ -781,9 +781,16 @@ function buildLeanLabel(
     return 'PASS';
   }
 
-  // Spread
-  if (direction === 'toward_home') return `${homeTeam} ${currentLine}`;
-  if (direction === 'toward_away') return `${awayTeam} ${currentLine > 0 ? '+' : ''}${-currentLine}`;
+  // Spread — currentLine is from HOME perspective (negative = home favored)
+  // toward_home: home team getting more favored, show home team + their line
+  // toward_away: away team getting more favored, show away team + flipped line
+  if (direction === 'toward_home') {
+    return `${homeTeam} ${currentLine > 0 ? '+' : ''}${currentLine}`;
+  }
+  if (direction === 'toward_away') {
+    const awayLine = -currentLine;
+    return `${awayTeam} ${awayLine > 0 ? '+' : ''}${awayLine}`;
+  }
   return 'PASS';
 }
 
@@ -793,10 +800,13 @@ function buildSummaryMode(
   totalMove: number,
   marketType: MarketType,
   T: MarketThresholds,
+  homeTeam: string,
+  awayTeam: string,
 ): string {
   const absMove = Math.abs(totalMove);
   const moveDesc = absMove >= T.steam_move ? 'strong' : 'meaningful';
-  const dirDesc = primary.direction;
+  // Convert internal direction codes to team-relative readable text
+  const dirDesc = directionToLabel(primary.direction, marketType, homeTeam, awayTeam);
 
   const stateDesc: Record<LifecycleState, string> = {
     QUIET: 'No significant activity.',
@@ -815,6 +825,23 @@ function buildSummaryMode(
     : '';
 
   return `${primaryDesc}${currentDesc}`.trim();
+}
+
+/** Convert internal direction codes to readable team-relative labels. */
+function directionToLabel(
+  direction: string,
+  marketType: MarketType,
+  homeTeam: string,
+  awayTeam: string,
+): string {
+  if (marketType === 'total' || marketType === '1h_total') {
+    if (direction === 'over') return 'over';
+    if (direction === 'under') return 'under';
+    return '';
+  }
+  if (direction === 'toward_home') return `toward ${homeTeam}`;
+  if (direction === 'toward_away') return `toward ${awayTeam}`;
+  return '';
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

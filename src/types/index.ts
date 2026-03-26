@@ -78,6 +78,9 @@ export interface GameView {
   moneylineAway: number | null
   mlMoveHome: number | null
 
+  // Book coverage (for partial board display)
+  booksReporting: number | null
+
   isLocked: boolean
   lastUpdated: string
 }

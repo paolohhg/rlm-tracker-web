@@ -578,6 +578,11 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
                   {formatGameTime(game.gameTime)}
                 </span>
               )}
+              {game.booksReporting != null && game.booksReporting > 0 && game.booksReporting < 5 && (
+                <span style={{ color: T.accent, fontSize: '9px', fontFamily: T.font, opacity: 0.7 }}>
+                  {game.booksReporting} of 7 books
+                </span>
+              )}
             </div>
           </div>
         </div>
