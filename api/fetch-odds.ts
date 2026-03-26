@@ -196,10 +196,75 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       return res.status(errors.length ? 502 : 200).json({ error: msg, api_calls: apiCalls, errors });
     }
 
-    const { error } = await supabase.from('odds_snapshots').insert(rows);
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    // Insert into odds_snapshots (append-only history).
+    // This may fail on large tables — non-fatal, latest_odds is the primary source.
+    let snapshotsInserted = 0;
+    try {
+      const { error } = await supabase.from('odds_snapshots').insert(rows);
+      if (error) {
+        console.error('[fetch-odds] odds_snapshots insert error (non-fatal):', error.message);
+      } else {
+        snapshotsInserted = rows.length;
+      }
+    } catch (e: any) {
+      console.error('[fetch-odds] odds_snapshots insert crashed (non-fatal):', e.message);
     }
+
+    // Upsert into latest_odds (current-state table — PRIMARY read source).
+    // One row per game+sportsbook, updated on each cron run.
+    const latestRows = rows.map(r => ({
+      league: r.league,
+      home_team: r.home_team,
+      away_team: r.away_team,
+      game_time: r.game_time,
+      sportsbook: r.bookmaker,
+      book_type: r.book_type,
+      spread: r.spread,
+      spread_home_price: r.spread_home_price,
+      moneyline_home: r.moneyline_home,
+      moneyline_away: r.moneyline_away,
+      total: r.total,
+      total_over_price: r.total_over_price,
+      total_under_price: r.total_under_price,
+      updated_at: now,
+    }));
+
+    let latestUpserted = 0;
+    try {
+      const { error: latestError } = await supabase
+        .from('latest_odds')
+        .upsert(latestRows, {
+          onConflict: 'league,home_team,away_team,game_time,sportsbook',
+          ignoreDuplicates: false,
+        });
+      if (latestError) {
+        console.error('[fetch-odds] latest_odds upsert error:', latestError.message);
+      } else {
+        latestUpserted = latestRows.length;
+      }
+    } catch (e: any) {
+      console.error('[fetch-odds] latest_odds upsert crashed:', e.message);
+    }
+
+    // Also set openers for any book+game that doesn't have one yet
+    try {
+      const openerUpdates = latestRows.map(r => ({
+        ...r,
+        opener_spread: r.spread,
+        opener_moneyline_home: r.moneyline_home,
+        opener_moneyline_away: r.moneyline_away,
+        opener_total: r.total,
+        opener_captured_at: now,
+        created_at: now,
+      }));
+      // Only insert openers for rows that don't exist yet (ignoreDuplicates)
+      await supabase
+        .from('latest_odds')
+        .upsert(openerUpdates, {
+          onConflict: 'league,home_team,away_team,game_time,sportsbook',
+          ignoreDuplicates: true, // Don't overwrite existing rows (preserves openers)
+        });
+    } catch { /* non-critical */ }
 
     const leagueCounts: Record<string, number> = {};
     for (const r of rows) {
@@ -209,7 +274,8 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     return res.status(200).json({
       ok: true,
       source: 'vercel-direct',
-      inserted: rows.length,
+      inserted: snapshotsInserted,
+      latest_upserted: latestUpserted,
       api_calls: apiCalls,
       league_counts: leagueCounts,
       ...(errors.length ? { partial_errors: errors } : {}),

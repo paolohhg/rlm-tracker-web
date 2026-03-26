@@ -1192,25 +1192,75 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // so data is always fresh. Fetching here was causing the dashboard to
     // change (new rows inserted for all games) every time HSA was generated.
 
-    // Fetch odds snapshots scoped to this specific game
-    // Filter by league + game_time window to prevent cross-game contamination
-    //
-    // Use a wide window (7 days before game_time) to capture true openers.
-    // The old 24h window missed openers for games whose lines posted days ahead,
-    // causing HSA to see "no movement" while the dashboard showed real movement.
-    //
-    // IMPORTANT: Supabase default limit is 1000 rows. With 5+ books polling
-    // every 10 min, that can be exceeded. We order descending (newest first)
-    // and limit to 1000 to guarantee current lines are included.
+    // ── Fetch odds from latest_odds (current-state table) ──────────
+    // PRIMARY SOURCE: latest_odds has one row per book+game, updated each cron.
+    // This is fast (small table, indexed) and never times out.
+    // odds_snapshots is append-only history and should NOT be queried in request path.
     const gameTimeDate = new Date(game_time);
     const windowStart = new Date(gameTimeDate.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const windowEnd = new Date(gameTimeDate.getTime() + 4 * 60 * 60 * 1000).toISOString();
 
-    // Retry Supabase query up to 3 times (handles transient timeouts/connection issues)
-    let oddsDesc: any[] | null = null;
-    let oddsError: any = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const result = await supabase
+    let odds: any[] | null = null;
+    let oddsSource = 'latest_odds';
+
+    // Try latest_odds first (fast, small table)
+    const { data: latestOddsData, error: latestError } = await supabase
+      .from('latest_odds')
+      .select('sportsbook,spread,spread_home_price,moneyline_home,moneyline_away,total,total_over_price,updated_at,league,game_time,home_team,away_team,book_type,opener_spread,opener_moneyline_home,opener_moneyline_away,opener_total,opener_captured_at')
+      .eq('league', league)
+      .eq('home_team', home_team)
+      .eq('away_team', away_team)
+      .gte('game_time', windowStart)
+      .lte('game_time', windowEnd);
+
+    if (!latestError && latestOddsData?.length) {
+      // Convert latest_odds format to OddsSnapshot format for the summarizer.
+      // Create TWO snapshots per book: one "opener" and one "current"
+      // so the summarizer sees movement from open → current.
+      const converted: any[] = [];
+      for (const row of latestOddsData) {
+        // Opener snapshot (if available)
+        if (row.opener_captured_at) {
+          converted.push({
+            bookmaker: row.sportsbook,
+            spread: row.opener_spread ?? row.spread,
+            spread_home_price: row.spread_home_price,
+            moneyline_home: row.opener_moneyline_home ?? row.moneyline_home,
+            moneyline_away: row.opener_moneyline_away ?? row.moneyline_away,
+            total: row.opener_total ?? row.total,
+            total_over_price: row.total_over_price,
+            fetched_at: row.opener_captured_at,
+            league: row.league,
+            game_time: row.game_time,
+            home_team: row.home_team,
+            away_team: row.away_team,
+            book_type: row.book_type,
+          });
+        }
+        // Current snapshot
+        converted.push({
+          bookmaker: row.sportsbook,
+          spread: row.spread,
+          spread_home_price: row.spread_home_price,
+          moneyline_home: row.moneyline_home,
+          moneyline_away: row.moneyline_away,
+          total: row.total,
+          total_over_price: row.total_over_price,
+          fetched_at: row.updated_at,
+          league: row.league,
+          game_time: row.game_time,
+          home_team: row.home_team,
+          away_team: row.away_team,
+          book_type: row.book_type,
+        });
+      }
+      odds = converted.sort((a, b) => new Date(a.fetched_at).getTime() - new Date(b.fetched_at).getTime());
+      console.log(`[HSA] Read ${latestOddsData.length} books from latest_odds (${odds.length} snapshots including openers)`);
+    } else {
+      // Fallback: try odds_snapshots with tight bounds (may timeout on large table)
+      console.warn(`[HSA] latest_odds miss (${latestError?.message ?? 'no rows'}), falling back to odds_snapshots`);
+      oddsSource = 'odds_snapshots_fallback';
+      const { data: fallbackData, error: fallbackError } = await supabase
         .from('odds_snapshots')
         .select('bookmaker,spread,spread_home_price,moneyline_home,moneyline_away,total,total_over_price,fetched_at,league,game_time,home_team,away_team,book_type')
         .eq('league', league)
@@ -1219,40 +1269,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .gte('game_time', windowStart)
         .lte('game_time', windowEnd)
         .order('fetched_at', { ascending: false })
-        .limit(1000);
+        .limit(500);
 
-      if (!result.error) {
-        oddsDesc = result.data;
-        oddsError = null;
-        break;
+      if (fallbackError) {
+        return res.status(500).json({
+          error: `Failed to fetch odds: ${fallbackError.message}`,
+          detail: fallbackError.message,
+          source: 'odds_snapshots_fallback',
+        });
       }
-
-      oddsError = result.error;
-      console.error(`[HSA] Supabase odds query attempt ${attempt + 1} failed:`, {
-        message: oddsError.message,
-        code: oddsError.code,
-        hint: oddsError.hint,
-        details: oddsError.details,
-        league, home_team, away_team, game_time,
-      });
-
-      if (attempt < 2) {
-        await new Promise(r => setTimeout(r, Math.pow(2, attempt + 1) * 1000));
-      }
-    }
-
-    // Reverse to ascending for summarizer (it expects chronological order)
-    const odds = oddsDesc ? [...oddsDesc].reverse() : null;
-
-    if (oddsError) {
-      console.error('[HSA] Supabase odds query error:', JSON.stringify(oddsError));
-      return res.status(500).json({
-        error: `Failed to fetch odds: ${oddsError.message || oddsError.code || 'unknown error'}`,
-        detail: oddsError.message,
-        code: oddsError.code,
-        hint: oddsError.hint,
-        query_params: { league, home_team, away_team, game_time, windowStart, windowEnd },
-      });
+      odds = fallbackData ? [...fallbackData].reverse() : null;
     }
 
     if (!odds?.length) {

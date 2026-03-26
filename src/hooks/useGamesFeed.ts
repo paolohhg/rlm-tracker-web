@@ -805,14 +805,16 @@ export function useGamesFeed() {
             t.created_at ??
             new Date().toISOString(),
 
-          // Confidence: derive from signal tier + market movement
-          sideConfidence: deriveSideConfidence(
-            alert?.signal_tier ?? alert?.overall_badge ?? null,
-            lineMoveAmount,
-            t.league as string,
-            openingMoneylineHome as number | null,
-            moneylineHome as number | null,
-          ),
+          // Confidence: use stored value from analysis if available (single source of truth).
+          // Falls back to local computation if no analysis exists yet.
+          sideConfidence: analysis?.confidence_label
+            ?? deriveSideConfidence(
+              alert?.signal_tier ?? alert?.overall_badge ?? null,
+              lineMoveAmount,
+              t.league as string,
+              openingMoneylineHome as number | null,
+              moneylineHome as number | null,
+            ),
           totalConfidence: deriveTotalConfidence(
             openingTotal,
             currentTotal,
