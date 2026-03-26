@@ -1,102 +1,36 @@
 // Fetches odds from The Odds API and inserts into Supabase.
 // Runs every 10 min via Vercel cron (see vercel.json).
-// Previously delegated to a Supabase edge function — now runs directly
-// in Vercel so it deploys with git push (no separate CLI deploy needed).
+// Runs directly in Vercel — no Supabase edge function needed.
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
-// ── Sharp vs Square book classification ─────────────────────
-const SHARP_BOOKS = new Set(["pinnacle", "circa", "bookmaker", "heritage"]);
-
-// ── Leagues to track ─────────────────────────────────────────
-const LEAGUES = [
-  { key: "basketball_nba",   league: "NBA"   },
-  { key: "basketball_ncaab", league: "NCAAB" },
-  { key: "baseball_mlb",     league: "MLB"   },
-  { key: "icehockey_nhl",    league: "NHL"   },
-];
-
-const BOOKMAKERS = "draftkings,fanduel,betmgm,pinnacle,caesars,pointsbetus,espnbet";
-
-// ── Smart polling logic ──────────────────────────────────────
-function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
-  const now = Date.now();
-  const tip = new Date(commenceTime).getTime();
-  const hoursUntil = (tip - now) / 3600000;
-
-  if (hoursUntil <= 1) return true;
-  if (hoursUntil <= 12) return true;
-  if (hoursUntil <= 48) return true;
-  if (!alreadySeen) return true;
-  return false;
-}
-
-// ── Markets per league ────────────────────────────────────────
-function marketsForLeague(key: string, league: string): string {
-  if (league === "MLB") return "spreads,h2h,totals,alternate_runlines";
-  if (league === "NHL") return "h2h,totals,spreads";
-  return "spreads,h2h,totals";
-}
-
-// ── Retry helper ─────────────────────────────────────────────
-async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await fetch(url);
-      if (res.ok || res.status < 500) return res;
-      lastError = new Error(`HTTP ${res.status}`);
-    } catch (err: any) {
-      lastError = err;
-    }
-    if (attempt < maxRetries) {
-      await new Promise(r => setTimeout(r, Math.pow(2, attempt + 1) * 1000));
-    }
-  }
-  throw lastError || new Error('fetchWithRetry failed');
-}
-// ── fetch-odds: Vercel cron handler ──────────────────────────────────────────
-// Runs every 10 min via Vercel cron (see vercel.json).
-// Fetches odds directly from The Odds API and inserts into Supabase.
-// Previously proxied to a Supabase edge function, but that required manual
-// deployment. Running here means code deploys automatically with git push.
-// ─────────────────────────────────────────────────────────────────────────────
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
-
-// Allow up to 60s (Hobby plan max) — fetching 6 leagues needs time
+// Allow up to 60s (Hobby plan max) — fetching multiple leagues needs time
 export const maxDuration = 60;
 
-// ── Leagues to track ─────────────────────────────────────────
+const SHARP_BOOKS = new Set(['pinnacle', 'circa', 'bookmaker', 'heritage']);
+
 const LEAGUES = [
-  { key: 'basketball_nba',         league: 'NBA'   },
-  { key: 'basketball_ncaab',       league: 'NCAAB' },
-  { key: 'basketball_ncaab_nit',   league: 'NCAAB' },
-  { key: 'baseball_mlb',           league: 'MLB'   },
-  { key: 'baseball_mlb_preseason', league: 'MLB'   },
-  { key: 'icehockey_nhl',          league: 'NHL'   },
+  { key: 'basketball_nba',   league: 'NBA'   },
+  { key: 'basketball_ncaab', league: 'NCAAB' },
+  { key: 'baseball_mlb',     league: 'MLB'   },
+  { key: 'icehockey_nhl',    league: 'NHL'   },
 ];
 
 const BOOKMAKERS = 'draftkings,fanduel,betmgm,pinnacle,caesars,pointsbetus,espnbet';
 
-const SHARP_BOOKS = new Set(['pinnacle', 'circa', 'bookmaker', 'heritage']);
-
-// ── Markets per league ───────────────────────────────────────
 function marketsForLeague(league: string): string {
+  if (league === 'MLB') return 'spreads,h2h,totals,alternate_runlines';
   if (league === 'NHL') return 'h2h,totals,spreads';
   return 'spreads,h2h,totals';
 }
 
-// ── Smart polling ────────────────────────────────────────────
 function shouldPoll(commenceTime: string, alreadySeen: boolean): boolean {
   const hoursUntil = (new Date(commenceTime).getTime() - Date.now()) / 3600000;
   if (hoursUntil <= 48) return true;
-  if (hoursUntil <= 240) return true;  // 10 days
   if (!alreadySeen) return true;
   return false;
 }
 
-// ── Retry helper ─────────────────────────────────────────────
 async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -114,121 +48,76 @@ async function fetchWithRetry(url: string, maxRetries = 2): Promise<Response> {
   throw lastError || new Error('fetchWithRetry failed');
 }
 
-// ── Main handler ─────────────────────────────────────────────
+/** Format date for The Odds API: YYYY-MM-DDTHH:MM:SSZ (no milliseconds) */
+function formatOddsApiDate(date: Date): string {
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
-  const ODDS_API_KEY = process.env.ODDS_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const oddsApiKey = process.env.ODDS_API_KEY;
-
-  if (!supabaseUrl || !serviceKey) {
-    return res.status(500).json({ error: 'Missing Supabase credentials' });
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!ODDS_API_KEY || !supabaseUrl || !supabaseKey) {
-    return res.status(500).json({ error: 'Missing env vars (ODDS_API_KEY, SUPABASE_URL, or SUPABASE_SERVICE_ROLE_KEY)' });
-  }
-  if (!oddsApiKey) {
-    return res.status(500).json({ error: 'Missing ODDS_API_KEY' });
-  }
-
-  const supabase = createClient(supabaseUrl, serviceKey);
-  const rows: Record<string, unknown>[] = [];
-  const supabase = createClient(supabaseUrl, supabaseKey);
-  const rows: Record<string, unknown>[] = [];
-  const openerRows: Record<string, unknown>[] = [];
-  const errors: string[] = [];
-  const now = new Date().toISOString();
-  let apiCalls = 0;
-
   try {
-    // Load seen games for opening line logic
+    const ODDS_API_KEY = process.env.ODDS_API_KEY;
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!ODDS_API_KEY || !supabaseUrl || !supabaseKey) {
+      return res.status(500).json({
+        error: 'Missing env vars',
+        has_odds_key: !!ODDS_API_KEY,
+        has_url: !!supabaseUrl,
+        has_key: !!supabaseKey,
+      });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const rows: Record<string, unknown>[] = [];
+    const errors: string[] = [];
+    const now = new Date().toISOString();
+    let apiCalls = 0;
+
+    // Load already-seen games
     const { data: seenRows } = await supabase
-      .from("odds_snapshots")
-      .select("home_team, away_team, league")
-      .gte("fetched_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+      .from('odds_snapshots')
+      .select('home_team, away_team, league')
+      .gte('fetched_at', new Date(Date.now() - 7 * 24 * 3600000).toISOString());
     const seenGames = new Set<string>(
       (seenRows ?? []).map((r: any) => `${r.league}|${r.home_team}|${r.away_team}`)
     );
 
-    for (const { key, league } of LEAGUES) {
-      const markets = marketsForLeague(key, league);
-      const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${oddsApiKey}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}`;
+    // commenceTimeTo: 10 days ahead, formatted without milliseconds
+    const commenceTimeTo = formatOddsApiDate(new Date(Date.now() + 10 * 24 * 3600000));
 
-      let games: Record<string, unknown>[];
-      try {
-        const apiRes = await fetchWithRetry(url);
-        apiCalls++;
-
-        if (!apiRes.ok) {
-          const body = await apiRes.text();
-          const errMsg = `League fetch failed: HTTP ${apiRes.status} — ${body.slice(0, 200)}`;
-          console.error(`[fetch-odds] ${league} (${key}): ${errMsg}`);
-          errors.push(errMsg);
-          continue;
+    // Fetch all leagues in parallel
+    const leagueResults = await Promise.allSettled(
+      LEAGUES.map(async ({ key, league }) => {
+        const markets = marketsForLeague(league);
+        const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}&commenceTimeTo=${commenceTimeTo}`;
+        const response = await fetchWithRetry(url);
+        const body = await response.json();
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} — ${JSON.stringify(body).slice(0, 200)}`);
         }
-
-        games = await apiRes.json() as Record<string, unknown>[];
-        if (!Array.isArray(games)) {
-          errors.push(`${league}: API returned non-array`);
-          continue;
+        if (!Array.isArray(body)) {
+          throw new Error(`non-array response: ${JSON.stringify(body).slice(0, 200)}`);
         }
-      } catch (err: any) {
-        errors.push(`${league}: ${err.message}`);
+        return { key, league, games: body as Record<string, unknown>[] };
+      })
+    );
+
+    for (const result of leagueResults) {
+      apiCalls++;
+      if (result.status === 'rejected') {
+        const errMsg = `League fetch failed: ${result.reason?.message ?? result.reason}`;
+        console.error(`[fetch-odds] ${errMsg}`);
+        errors.push(errMsg);
         continue;
-  // Load already-seen games
-  const { data: seenRows } = await supabase
-    .from('odds_snapshots')
-    .select('home_team, away_team, league')
-    .gte('fetched_at', new Date(Date.now() - 10 * 24 * 3600000).toISOString());
-  const seenGames = new Set<string>(
-    (seenRows ?? []).map((r: any) => `${r.league}|${r.home_team}|${r.away_team}`)
-  );
-
-  // Load existing openers
-  const { data: existingOpeners } = await supabase
-    .from('book_openers')
-    .select('league, home_team, away_team, sportsbook, market_type');
-  const openerKeys = new Set<string>(
-    (existingOpeners ?? []).map((r: any) =>
-      `${r.league}|${r.home_team}|${r.away_team}|${r.sportsbook}|${r.market_type}`)
-  );
-
-  const mlbGames: { home: string; away: string; time: string; books: number }[] = [];
-  const commenceTimeTo = new Date(Date.now() + 10 * 24 * 3600000).toISOString();
-
-  // Fetch all leagues in parallel to stay within Vercel timeout
-  const leagueResults = await Promise.allSettled(
-    LEAGUES.map(async ({ key, league }) => {
-      const markets = marketsForLeague(league);
-      const url = `https://api.the-odds-api.com/v4/sports/${key}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=${BOOKMAKERS}&commenceTimeTo=${commenceTimeTo}`;
-      const response = await fetchWithRetry(url);
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} — ${JSON.stringify(body).slice(0, 200)}`);
       }
-      if (!Array.isArray(body)) {
-        throw new Error(`non-array response: ${JSON.stringify(body).slice(0, 200)}`);
-      }
-      return { key, league, games: body as Record<string, unknown>[] };
-    })
-  );
-
-  for (const result of leagueResults) {
-    apiCalls++;
-    if (result.status === 'rejected') {
-      const errMsg = `League fetch failed: ${result.reason?.message ?? result.reason}`;
-      console.error(`[fetch-odds] ${errMsg}`);
-      errors.push(errMsg);
-      continue;
-    }
-    const { key, league, games } = result.value;
-    console.log(`[fetch-odds] ${league} (${key}): ${games.length} games`);
+      const { league, games } = result.value;
 
       for (const game of games) {
         const commenceTime = game.commence_time as string;
-        const gameSeenKey = `${league}|${game.home_team}|${game.away_team}`;
-        const alreadySeen = seenGames.has(gameSeenKey);
+        const homeTeam = game.home_team as string;
+        const awayTeam = game.away_team as string;
+        const alreadySeen = seenGames.has(`${league}|${homeTeam}|${awayTeam}`);
 
         if (!shouldPoll(commenceTime, alreadySeen)) continue;
 
@@ -236,7 +125,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
 
         for (const bookmaker of bookmakers) {
           const bookKey = bookmaker.key as string;
-          const bookType = SHARP_BOOKS.has(bookKey) ? "sharp" : "square";
+          const bookType = SHARP_BOOKS.has(bookKey) ? 'sharp' : 'square';
           const marketsList = (bookmaker.markets as Record<string, unknown>[]) ?? [];
 
           let spread: number | null = null;
@@ -255,76 +144,48 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
             const mKey = market.key as string;
             const outcomes = (market.outcomes as Record<string, unknown>[]) ?? [];
 
-            if (mKey === "spreads") {
+            if (mKey === 'spreads') {
               for (const o of outcomes) {
-                if (o.name === game.home_team) {
+                if (o.name === homeTeam) {
                   spread = o.point as number;
                   spreadHomePrice = o.price as number;
                 }
               }
             }
 
-            if (mKey === "h2h") {
+            if (mKey === 'h2h') {
               for (const o of outcomes) {
-                if (o.name === game.home_team) moneylineHome = o.price as number;
-                if (o.name === game.away_team) moneylineAway = o.price as number;
+                if (o.name === homeTeam) moneylineHome = o.price as number;
+                if (o.name === awayTeam) moneylineAway = o.price as number;
               }
             }
 
-            if (mKey === "totals") {
+            if (mKey === 'totals') {
               for (const o of outcomes) {
-                if (o.name === "Over") { total = o.point as number; totalOverPrice = o.price as number; }
-                if (o.name === "Under") totalUnderPrice = o.price as number;
+                if (o.name === 'Over') { total = o.point as number; totalOverPrice = o.price as number; }
+                if (o.name === 'Under') totalUnderPrice = o.price as number;
               }
             }
 
-            if (mKey === "alternate_runlines" || (league === "MLB" && mKey === "spreads")) {
+            if (league === 'MLB' && mKey === 'spreads') {
               for (const o of outcomes) {
-                if (o.name === game.home_team) {
-                  runlineHome = o.point as number;
-                  runlineHomePrice = o.price as number;
-                }
-                if (o.name === game.away_team) {
-                  runlineAway = o.point as number;
-                  runlineAwayPrice = o.price as number;
-                }
+                if (o.name === homeTeam) { runlineHome = o.point as number; runlineHomePrice = o.price as number; }
+                if (o.name === awayTeam) { runlineAway = o.point as number; runlineAwayPrice = o.price as number; }
               }
             }
           }
 
           rows.push({
-            league,
-            game_time: commenceTime,
-            home_team: game.home_team,
-            away_team: game.away_team,
-            bookmaker: bookKey,
-            book_type: bookType,
-            spread,
-            spread_home_price: spreadHomePrice,
-            moneyline_home: moneylineHome,
-            moneyline_away: moneylineAway,
-            total,
-            total_over_price: totalOverPrice,
-            total_under_price: totalUnderPrice,
-            runline_home: runlineHome,
-            runline_away: runlineAway,
-            runline_home_price: runlineHomePrice,
-            runline_away_price: runlineAwayPrice,
+            league, game_time: commenceTime, home_team: homeTeam, away_team: awayTeam,
+            bookmaker: bookKey, book_type: bookType,
+            spread, spread_home_price: spreadHomePrice,
+            moneyline_home: moneylineHome, moneyline_away: moneylineAway,
+            total, total_over_price: totalOverPrice, total_under_price: totalUnderPrice,
+            runline_home: runlineHome, runline_away: runlineAway,
+            runline_home_price: runlineHomePrice, runline_away_price: runlineAwayPrice,
             fetched_at: now,
           });
         }
-    for (const game of games) {
-      const commenceTime = game.commence_time as string;
-      const homeTeam = game.home_team as string;
-      const awayTeam = game.away_team as string;
-      const alreadySeen = seenGames.has(`${league}|${homeTeam}|${awayTeam}`);
-
-      if (!shouldPoll(commenceTime, alreadySeen)) continue;
-
-      const bookmakers = (game.bookmakers as Record<string, unknown>[]) ?? [];
-
-      if (league === 'MLB' && !key.includes('preseason')) {
-        mlbGames.push({ home: homeTeam, away: awayTeam, time: commenceTime, books: bookmakers.length });
       }
     }
 
@@ -333,173 +194,28 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
         ? `No rows collected. Errors: ${errors.join('; ')}`
         : 'No rows collected (no games found across all leagues)';
       return res.status(errors.length ? 502 : 200).json({ error: msg, api_calls: apiCalls, errors });
-      for (const bookmaker of bookmakers) {
-        const bookKey = bookmaker.key as string;
-        const bookType = SHARP_BOOKS.has(bookKey) ? 'sharp' : 'square';
-        const marketsList = (bookmaker.markets as Record<string, unknown>[]) ?? [];
-
-        let spread: number | null = null;
-        let spreadHomePrice: number | null = null;
-        let moneylineHome: number | null = null;
-        let moneylineAway: number | null = null;
-        let total: number | null = null;
-        let totalOverPrice: number | null = null;
-        let totalUnderPrice: number | null = null;
-        let runlineHome: number | null = null;
-        let runlineAway: number | null = null;
-        let runlineHomePrice: number | null = null;
-        let runlineAwayPrice: number | null = null;
-
-        for (const market of marketsList) {
-          const mKey = market.key as string;
-          const outcomes = (market.outcomes as Record<string, unknown>[]) ?? [];
-
-          if (mKey === 'spreads') {
-            for (const o of outcomes) {
-              if (o.name === homeTeam) {
-                spread = o.point as number;
-                spreadHomePrice = o.price as number;
-              }
-            }
-          }
-
-          if (mKey === 'h2h') {
-            for (const o of outcomes) {
-              if (o.name === homeTeam) moneylineHome = o.price as number;
-              if (o.name === awayTeam) moneylineAway = o.price as number;
-            }
-          }
-
-          if (mKey === 'totals') {
-            for (const o of outcomes) {
-              if (o.name === 'Over') { total = o.point as number; totalOverPrice = o.price as number; }
-              if (o.name === 'Under') totalUnderPrice = o.price as number;
-            }
-          }
-
-          // MLB run line comes from spreads market (±1.5)
-          if (league === 'MLB' && mKey === 'spreads') {
-            for (const o of outcomes) {
-              if (o.name === homeTeam) { runlineHome = o.point as number; runlineHomePrice = o.price as number; }
-              if (o.name === awayTeam) { runlineAway = o.point as number; runlineAwayPrice = o.price as number; }
-            }
-          }
-        }
-
-        rows.push({
-          league, game_time: commenceTime, home_team: homeTeam, away_team: awayTeam,
-          bookmaker: bookKey, book_type: bookType,
-          spread, spread_home_price: spreadHomePrice,
-          moneyline_home: moneylineHome, moneyline_away: moneylineAway,
-          total, total_over_price: totalOverPrice, total_under_price: totalUnderPrice,
-          runline_home: runlineHome, runline_away: runlineAway,
-          runline_home_price: runlineHomePrice, runline_away_price: runlineAwayPrice,
-          fetched_at: now,
-        });
-
-        // Per-book opener tracking
-        const openerBase = { league, home_team: homeTeam, away_team: awayTeam, game_time: commenceTime, sportsbook: bookKey };
-        if (moneylineHome != null) {
-          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|moneyline`;
-          if (!openerKeys.has(opKey)) {
-            openerRows.push({ ...openerBase, market_type: 'moneyline', opener_value: moneylineHome, opener_price: moneylineAway, first_seen_at: now });
-            openerKeys.add(opKey);
-          }
-        }
-        if (spread != null) {
-          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|spread`;
-          if (!openerKeys.has(opKey)) {
-            openerRows.push({ ...openerBase, market_type: 'spread', opener_value: spread, opener_price: spreadHomePrice, first_seen_at: now });
-            openerKeys.add(opKey);
-          }
-        }
-        if (total != null) {
-          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|total`;
-          if (!openerKeys.has(opKey)) {
-            openerRows.push({ ...openerBase, market_type: 'total', opener_value: total, opener_price: totalOverPrice, first_seen_at: now });
-            openerKeys.add(opKey);
-          }
-        }
-        if (runlineHome != null) {
-          const opKey = `${league}|${homeTeam}|${awayTeam}|${bookKey}|runline`;
-          if (!openerKeys.has(opKey)) {
-            openerRows.push({ ...openerBase, market_type: 'runline', opener_value: runlineHome, opener_price: runlineHomePrice, first_seen_at: now });
-            openerKeys.add(opKey);
-          }
-        }
-      }
     }
-  }
 
-    const { error: insertError } = await supabase.from("odds_snapshots").insert(rows);
-    if (insertError) {
-      return res.status(500).json({ error: insertError.message });
+    const { error } = await supabase.from('odds_snapshots').insert(rows);
+    if (error) {
+      return res.status(500).json({ error: error.message });
     }
 
     const leagueCounts: Record<string, number> = {};
     for (const r of rows) {
       leagueCounts[r.league as string] = (leagueCounts[r.league as string] || 0) + 1;
-  if (!rows.length) {
-    const msg = errors.length
-      ? `No rows collected. Errors: ${errors.join('; ')}`
-      : 'No rows collected (no games found across all leagues)';
-    return res.status(errors.length ? 502 : 200).json({ error: msg, api_calls: apiCalls, errors });
-  }
-
-  // Insert odds snapshots
-  const { error } = await supabase.from('odds_snapshots').insert(rows);
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
-
-  // Insert openers (ON CONFLICT DO NOTHING)
-  let openersInserted = 0;
-  if (openerRows.length > 0) {
-    const { error: openerErr } = await supabase
-      .from('book_openers')
-      .upsert(openerRows, { onConflict: 'league,home_team,away_team,game_time,sportsbook,market_type', ignoreDuplicates: true });
-    if (openerErr) {
-      console.error('Opener insert error:', openerErr.message);
-    } else {
-      openersInserted = openerRows.length;
     }
 
     return res.status(200).json({
       ok: true,
+      source: 'vercel-direct',
       inserted: rows.length,
       api_calls: apiCalls,
-      leagues: LEAGUES.map(l => l.league),
       league_counts: leagueCounts,
       ...(errors.length ? { partial_errors: errors } : {}),
     });
   } catch (err: any) {
-    console.error('[fetch-odds] Error:', err);
+    console.error('[fetch-odds] Crash:', err);
     return res.status(500).json({ error: err.message || 'Internal error' });
   }
-  // Debug counts
-  const leagueCounts: Record<string, number> = {};
-  for (const r of rows) {
-    leagueCounts[r.league as string] = (leagueCounts[r.league as string] || 0) + 1;
-  }
-
-  const mlbByDate: Record<string, number> = {};
-  for (const g of mlbGames) {
-    const d = g.time.split('T')[0];
-    mlbByDate[d] = (mlbByDate[d] || 0) + 1;
-  }
-
-  return res.status(200).json({
-    ok: true,
-    source: 'vercel-direct',
-    inserted: rows.length,
-    openers_saved: openersInserted,
-    api_calls: apiCalls,
-    league_counts: leagueCounts,
-    mlb_games: {
-      total: mlbGames.length,
-      by_date: mlbByDate,
-      sample: mlbGames.slice(0, 5).map(g => `${g.away} @ ${g.home} (${g.time}, ${g.books} books)`),
-    },
-    ...(errors.length ? { partial_errors: errors } : {}),
-  });
 }
