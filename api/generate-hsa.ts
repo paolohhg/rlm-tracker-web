@@ -1165,21 +1165,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // ── When force-refreshing, pull fresh odds first ──────────────
-    // Use the Vercel fetch-odds endpoint (NOT the Supabase edge function,
-    // which has a stale deployed version with broken commenceTimeTo).
-    if (force) {
-      try {
-        // Use relative URL to call our own Vercel endpoint
-        const baseUrl = process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : 'http://localhost:3000';
-        await fetch(`${baseUrl}/api/fetch-odds`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch { /* non-critical — continue with existing data */ }
-    }
+    // Note: removed force-refresh odds fetch. The cron runs every 10 min
+    // so data is always fresh. Fetching here was causing the dashboard to
+    // change (new rows inserted for all games) every time HSA was generated.
 
     // Fetch odds snapshots scoped to this specific game
     // Filter by league + game_time window to prevent cross-game contamination
