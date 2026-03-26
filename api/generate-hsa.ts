@@ -1184,14 +1184,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Fetch odds snapshots scoped to this specific game
     // Filter by league + game_time window to prevent cross-game contamination
     //
+    // Use a wide window (7 days before game_time) to capture true openers.
+    // The old 24h window missed openers for games whose lines posted days ahead,
+    // causing HSA to see "no movement" while the dashboard showed real movement.
+    //
     // IMPORTANT: Supabase default limit is 1000 rows. With 5+ books polling
-    // every 10 min over 24h, that's easily exceeded. To ensure we always
-    // get the LATEST snapshots, we:
-    //   1. Order descending (newest first)
-    //   2. Limit to 1000 (guaranteed to include current lines)
-    //   3. Reverse in-memory for the summarizer (expects ascending)
+    // every 10 min, that can be exceeded. We order descending (newest first)
+    // and limit to 1000 to guarantee current lines are included.
     const gameTimeDate = new Date(game_time);
-    const windowStart = new Date(gameTimeDate.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const windowStart = new Date(gameTimeDate.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const windowEnd = new Date(gameTimeDate.getTime() + 4 * 60 * 60 * 1000).toISOString();
 
     // Retry Supabase query up to 3 times (handles transient timeouts/connection issues)
