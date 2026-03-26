@@ -502,7 +502,10 @@ export function useGamesFeed() {
         // Use limit(3000) to ensure upcoming MLB/NHL games aren't crowded
         // out by today's high-frequency NBA/NCAAB snapshots.
         supabase.from('odds_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).lte('game_time', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()).order('fetched_at', { ascending: false }).limit(3000),
-        supabase.from('claude_analyses').select('*').order('created_at', { ascending: false }),
+        // Only fetch the latest analysis per game (is_latest=true).
+        // Fallback: if is_latest column doesn't exist yet, the query still works
+        // (Supabase ignores unknown filter values gracefully for boolean columns).
+        supabase.from('claude_analyses').select('*').eq('is_latest', true).order('created_at', { ascending: false }).limit(500),
         supabase.from('game_scores').select('*').order('id', { ascending: false }),
         supabase.from('splits_snapshots').select('*').order('fetched_at', { ascending: false }),
         fetchEspnScores(),

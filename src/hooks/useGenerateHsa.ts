@@ -6,13 +6,19 @@ interface GenerateParams {
   away_team: string;
   game_time: string;
   force?: boolean;
+  /** 'cache' = return cached if fresh. 'rerender' = same snapshot. 'refresh' = new odds. */
+  mode?: 'cache' | 'rerender' | 'refresh';
 }
 
 interface HsaResult {
   narrative: string;
   cached: boolean;
+  snapshot_id?: string;
   snapshot_count?: number;
   tracking_hours?: number;
+  confidence?: string;
+  status_tag?: string;
+  market_lean?: string;
 }
 
 export function useGenerateHsa(onSuccess?: () => void) {

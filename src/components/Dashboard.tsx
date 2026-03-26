@@ -369,20 +369,23 @@ function extractHsaField(text: string, field: string): string {
 }
 
 // ── HSA Modal ────────────────────────────────────────────────
-function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () => void; onRefresh: () => void }) {
+function HsaModal({ game, onClose }: { game: GameView; onClose: () => void }) {
   const [localNarrative, setLocalNarrative] = useState<string | null>(game.hsaNarrative);
-  const { generate, loading, error } = useGenerateHsa(onRefresh);
+  // No-op onRefresh — HSA modal should NOT refresh the entire dashboard
+  const { generate, loading, error } = useGenerateHsa();
 
-  const handleGenerate = useCallback(async (forceRefresh = false) => {
+  // Generate HSA: first click = cache/generate, subsequent = rerender (same snapshot)
+  const handleGenerate = useCallback(async (mode: 'cache' | 'rerender' | 'refresh' = 'cache') => {
     const result = await generate({
       league: game.league,
       home_team: game.homeTeam,
       away_team: game.awayTeam,
       game_time: game.gameTime,
-      force: forceRefresh || !!localNarrative,
+      force: mode === 'refresh',
+      mode,
     });
     if (result?.narrative) setLocalNarrative(result.narrative);
-  }, [generate, game, localNarrative]);
+  }, [generate, game]);
 
   const narrative = localNarrative;
 
@@ -458,14 +461,19 @@ function HsaModal({ game, onClose, onRefresh }: { game: GameView; onClose: () =>
             {/* Full narrative */}
             <div style={{ color: T.text, fontSize: '13px', lineHeight: 1.7, fontWeight: 500, fontFamily: T.font, whiteSpace: 'pre-wrap' }}>{narrative}</div>
             {error && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>{error}</div>}
-            <button onClick={() => handleGenerate(true)} disabled={loading} style={{ marginTop: '12px', background: 'transparent', border: `1px solid ${T.border}`, color: T.textSecondary, borderRadius: '6px', padding: '6px 14px', cursor: loading ? 'wait' : 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: T.font }}>
-              {loading ? 'Refreshing...' : 'Refresh Analysis'}
-            </button>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button onClick={() => handleGenerate('rerender')} disabled={loading} style={{ background: 'transparent', border: `1px solid ${T.border}`, color: T.textSecondary, borderRadius: '6px', padding: '6px 14px', cursor: loading ? 'wait' : 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: T.font }}>
+                {loading ? 'Loading...' : 'Regenerate Text'}
+              </button>
+              <button onClick={() => handleGenerate('refresh')} disabled={loading} style={{ background: 'transparent', border: `1px solid rgba(0,229,255,0.3)`, color: T.accent, borderRadius: '6px', padding: '6px 14px', cursor: loading ? 'wait' : 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: T.font }}>
+                {loading ? 'Refreshing...' : 'Refresh to Latest'}
+              </button>
+            </div>
           </div>
         ) : (
           <div style={{ textAlign: 'center', padding: '20px 0' }}>
             <div style={{ color: T.muted, fontSize: '13px', fontFamily: T.font, marginBottom: '16px' }}>No analysis available for this game yet.</div>
-            <button onClick={() => handleGenerate()} disabled={loading} style={{ background: T.accent, border: 'none', color: '#000', borderRadius: '8px', padding: '10px 22px', cursor: loading ? 'wait' : 'pointer', fontWeight: 700, fontSize: '13px', fontFamily: T.font }}>
+            <button onClick={() => handleGenerate('cache')} disabled={loading} style={{ background: T.accent, border: 'none', color: '#000', borderRadius: '8px', padding: '10px 22px', cursor: loading ? 'wait' : 'pointer', fontWeight: 700, fontSize: '13px', fontFamily: T.font }}>
               {loading ? 'Generating HSA...' : 'Generate HSA'}
             </button>
             {error && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '8px' }}>{error}</div>}
@@ -1206,7 +1214,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} onRefresh={() => {}} />}
+      {hsaGame && <HsaModal game={hsaGame} onClose={() => setHsaGame(null)} />}
       {/* logCycleGame modal removed — HM Cycles hidden for now */}
       {shareStudioGame && <ShareStudio game={shareStudioGame} onClose={() => setShareStudioGame(null)} />}
     </div>
