@@ -385,6 +385,14 @@ async function fetchEspnGames(): Promise<EspnGameEntry[]> {
         const away = comp.competitors?.find((c: any) => c.homeAway === 'away');
         if (!home || !away) continue;
 
+        // Reject fake/bracket placeholder events:
+        // - Must have valid team names (not empty, not TBD, not identical)
+        // - Must have team IDs (bracket placeholders lack these)
+        const hName = home.team?.displayName ?? home.team?.shortDisplayName ?? '';
+        const aName = away.team?.displayName ?? away.team?.shortDisplayName ?? '';
+        if (!hName || !aName || hName === 'TBD' || aName === 'TBD' || hName === aName) continue;
+        if (!home.team?.id || !away.team?.id) continue;
+
         const statusType = comp.status?.type?.name ?? '';
         const espnStatus =
           statusType === 'STATUS_FINAL' ? 'final' :
@@ -392,8 +400,8 @@ async function fetchEspnGames(): Promise<EspnGameEntry[]> {
           'upcoming';
 
         entries.push({
-          homeTeam: home.team.displayName ?? home.team.shortDisplayName ?? '',
-          awayTeam: away.team.displayName ?? away.team.shortDisplayName ?? '',
+          homeTeam: hName,
+          awayTeam: aName,
           gameTime: comp.date ?? event.date ?? '',
           league,
           tournament: parseTournament(event, league),
@@ -415,7 +423,6 @@ async function fetchEspnScores(): Promise<Record<string, EspnScoreEntry>> {
 
   const urls = [
     'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
-    // groups=50 includes NCAA Tournament + NIT + CBI
     'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50',
     'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard',
     'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard',
