@@ -568,18 +568,35 @@ export function useGamesFeed() {
         bookLinesMap[key] = Object.values(books).map(b => b.spread);
       }
 
+      // Build a set of games that actually have odds data (real games)
+      const oddsGameKeys = new Set<string>();
+      for (const o of odds) {
+        oddsGameKeys.add(buildMatchKey(o.league, o.home_team, o.away_team));
+      }
+
+      // Build a set of games from ESPN (confirmed real events)
+      const espnGameKeys = new Set<string>();
+      for (const eg of espnGames) {
+        espnGameKeys.add(buildMatchKey(eg.league, eg.homeTeam, eg.awayTeam));
+      }
+
       const uniqueTipoffs: any[] = [];
       const seenKeys = new Set<string>();
 
       for (const t of tipoffs) {
         const matchKey = buildMatchKey(t.league, t.home_team, t.away_team);
         const dedupKey = t.game_id ? String(t.game_id) : matchKey;
-        if (!seenKeys.has(dedupKey) && !seenKeys.has(matchKey)) {
-          seenKeys.add(dedupKey);
-          // Also add matchKey so ESPN/odds entries with swapped home/away get deduped
-          seenKeys.add(matchKey);
-          uniqueTipoffs.push(t);
-        }
+        if (seenKeys.has(dedupKey) || seenKeys.has(matchKey)) continue;
+
+        // Hard guard: reject tipoff entries that have no odds AND no ESPN confirmation.
+        // These are ghost games from stale detect-rlm runs or bad data.
+        const hasOdds = oddsGameKeys.has(matchKey);
+        const hasEspn = espnGameKeys.has(matchKey);
+        if (!hasOdds && !hasEspn) continue;
+
+        seenKeys.add(dedupKey);
+        seenKeys.add(matchKey);
+        uniqueTipoffs.push(t);
       }
 
       // Synthesize tipoff entries from odds_snapshots for games not in tipoff_snapshots
