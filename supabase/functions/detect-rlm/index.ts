@@ -1,5 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  detectHeardAlertMLB,
+  detectHeardAlertNHL,
+  detectHeardAlertTotalMLB,
+  detectHeardAlertTotalNHL,
+  type HeardAlertResult,
+} from "./heard-alert.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -13,6 +20,7 @@ const cors = {
 type Confidence = "PASS" | "LOW" | "MODERATE" | "HIGH";
 
 type LayerSignal =
+  | "HEARD_ALERT"
   | "STEAM"
   | "RLM"
   | "SHARP_ACCUM"
@@ -161,6 +169,7 @@ function buildScenarioKey(
 
 function signalPriority(s: LayerSignal): number {
   switch (s) {
+    case "HEARD_ALERT": return 7;
     case "STEAM": return 6;
     case "RLM": return 5;
     case "SHARP_ACCUM": return 4;
@@ -710,6 +719,7 @@ function deriveOverall(
   sideRead: MarketRead,
   totalRead: MarketRead,
   mlRead: MarketRead,
+  heardAlert?: HeardAlertResult | null,
 ): OverallResult {
   const bestSpread = signalPriority(spreadSignal);
   const bestML = signalPriority(mlSignal);
@@ -730,6 +740,44 @@ function deriveOverall(
   let signalTier = "";
   let alertType = "";
   let scenarioKey = "";
+
+  // 0. HEARD ALERT — top priority, overrides everything
+  if (heardAlert) {
+    signalTier = "HEARD ALERT";
+    alertType = heardAlert.type!;
+    primaryMarket = heardAlert.moveData.market;
+    scenarioKey = `${alertType}|${heardAlert.booksInvolved.count}books|${heardAlert.moveData.deltaCents}c|${heardAlert.timing.windowMinutes}min`;
+
+    // Override the relevant market read
+    const heardRead: MarketRead = {
+      lean: `${heardAlert.sharpSide} ML`,
+      confidence: "HIGH",
+      signal_type: alertType,
+      summary_reason: heardAlert.summary,
+    };
+
+    if (heardAlert.moveData.market === 'moneyline') {
+      mlRead = heardRead;
+    } else {
+      totalRead = heardRead;
+    }
+
+    const sharpTeam = heardAlert.sharpSide;
+    const fadeTeam = sharpTeam === gf.homeTeam ? gf.awayTeam : gf.homeTeam;
+
+    return {
+      signalTier,
+      alertType,
+      scenarioKey,
+      overallBadge: "HEARD ALERT",
+      primaryMarket,
+      primarySignal: alertType,
+      confidenceScore: heardAlert.confidence,
+      sharpTeam,
+      fadeTeam,
+      outputComplete: true,
+    };
+  }
 
   if (bestOverall >= 6) {
     signalTier = "STEAM MOVE";
@@ -1161,8 +1209,30 @@ serve(async (req) => {
       const totalRead = buildTotalRead(gf, totalSignal);
       const mlRead = buildMLRead(gf, mlSignal);
 
+      // ── Step 3.5: HEARD ALERT detection (before overall classification) ──
+      let heardAlert: HeardAlertResult | null = null;
+      if (gf.league === "MLB" || gf.league === "NHL") {
+        // ML detection
+        const mlDetector = gf.league === "MLB" ? detectHeardAlertMLB : detectHeardAlertNHL;
+        heardAlert = mlDetector(
+          gf.bookMLs.map(b => ({ ...b, firstAt: "", lastAt: "" })),
+          gf.homeTeam, gf.awayTeam,
+          gf.homeBetsPct, gf.homeMoneyPct,
+        );
+
+        // Total detection (only if ML didn't trigger)
+        if (!heardAlert) {
+          const totalDetector = gf.league === "MLB" ? detectHeardAlertTotalMLB : detectHeardAlertTotalNHL;
+          heardAlert = totalDetector(gf.bookTotals);
+        }
+
+        if (heardAlert) {
+          console.log(`[HEARD ALERT] ${gf.league} | ${gf.awayTeam} @ ${gf.homeTeam} | ${heardAlert.type} | ${heardAlert.summary}`);
+        }
+      }
+
       // ── Step 4: Overall classification from reads ──
-      let overall = deriveOverall(gf, spreadSignal, mlSignal, totalSignal, sideRead, totalRead, mlRead);
+      let overall = deriveOverall(gf, spreadSignal, mlSignal, totalSignal, sideRead, totalRead, mlRead, heardAlert);
 
       // ── Step 5: Narrative ──
       let hsaNarrative = "";
