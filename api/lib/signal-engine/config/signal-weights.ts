@@ -42,6 +42,7 @@ export const CONFIDENCE_THRESHOLDS = {
  * Even if individual factors are low, certain signal types carry baseline confidence.
  */
 export const SIGNAL_TYPE_FLOORS: Record<string, number> = {
+  HEARD_ALERT: 95,          // Top-tier — Pinnacle-led full-book underdog ML move
   FULL_BOOK_CONSENSUS: 55,  // Base floor — all books agree
   REVERSE_LINE_MOVEMENT: 35,
   STEAM_MOVE: 40,

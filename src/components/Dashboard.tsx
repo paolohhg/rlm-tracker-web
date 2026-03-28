@@ -283,7 +283,10 @@ function Badge({ label, color }: { label: string; color: string }) {
 function SignalBadges({ game }: { game: GameView }) {
   const badges: { label: string; color: string }[] = [];
 
-  // Signal badges
+  // Signal badges — in precedence order
+  if (game.signalTier === 'HEARD_ALERT' || game.signalTier === ('HEARD ALERT' as any)) {
+    badges.push({ label: 'HEARD ALERT', color: BADGE_COLORS['HEARD ALERT'] });
+  }
   if (isRlmSignal(game.signalTier)) {
     badges.push({ label: game.signalTier === 'DOUBLE NO-NARRATIVE RLM' ? 'DOUBLE RLM' : 'RLM', color: BADGE_COLORS.RLM });
   }
