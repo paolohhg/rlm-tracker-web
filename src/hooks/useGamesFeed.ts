@@ -618,30 +618,38 @@ export function useGamesFeed() {
         }
       }
 
-      // Synthesize tipoff entries from ESPN schedule for games not in DB.
-      // Only add UPCOMING or LIVE games — do NOT add finished games.
-      // Finished ESPN games without odds data are not useful on the dashboard.
+      // Synthesize tipoff entries from ESPN schedule — but ONLY for games
+      // that have odds data. ESPN-only games with no odds are noise on a
+      // betting intelligence dashboard and create ghost cards with all dashes.
       for (const eg of espnGames) {
-        // Skip finished games that have no odds tracking
         if (eg.status === 'final') continue;
 
         const key = buildMatchKey(eg.league, eg.homeTeam, eg.awayTeam);
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          uniqueTipoffs.push({
-            game_id: null,
-            league: eg.league,
-            home_team: eg.homeTeam,
-            away_team: eg.awayTeam,
-            game_time: eg.gameTime,
-            tournament: eg.tournament,
-            signal_tier: null,
-            sharp_team: null,
-            scenario_key: null,
-            is_locked: false,
-            created_at: new Date().toISOString(),
-          });
-        }
+        if (seenKeys.has(key)) continue; // Already in tipoffs or odds
+
+        // Check if this ESPN game has ANY odds data
+        const hasOdds = odds.some(o => {
+          const oKey = buildMatchKey(o.league, o.home_team, o.away_team);
+          return oKey === key;
+        });
+
+        // Only add ESPN games that have odds tracking OR are live
+        if (!hasOdds && eg.status !== 'live') continue;
+
+        seenKeys.add(key);
+        uniqueTipoffs.push({
+          game_id: null,
+          league: eg.league,
+          home_team: eg.homeTeam,
+          away_team: eg.awayTeam,
+          game_time: eg.gameTime,
+          tournament: eg.tournament,
+          signal_tier: null,
+          sharp_team: null,
+          scenario_key: null,
+          is_locked: false,
+          created_at: new Date().toISOString(),
+        });
       }
 
       // ── Hard guards: reject malformed matchups ──────────────────
