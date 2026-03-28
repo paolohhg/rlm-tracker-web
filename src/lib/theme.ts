@@ -14,6 +14,8 @@ export const T = {
 } as const;
 
 export const BADGE_COLORS: Record<string, string> = {
+  'HEARD ALERT': '#ff0040',
+  'HEARD_ALERT': '#ff0040',
   'DOUBLE NO-NARRATIVE RLM': '#00ff9c',
   'NO-NARRATIVE RLM': '#00ff9c',
   RLM: '#00ff9c',

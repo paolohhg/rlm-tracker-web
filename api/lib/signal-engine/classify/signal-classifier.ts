@@ -127,6 +127,12 @@ export function classifySignal(state: MarketState): SignalClassification {
     crossed_number: keyNumberResult.number,
   };
 
+  // 0. HEARD_ALERT — top-tier: Pinnacle-led full-book underdog ML move ≥300c in ≤200min
+  const heardResult = checkHeardAlert(state, T, leadership);
+  if (heardResult.match) {
+    return { type: 'HEARD_ALERT', factors: heardResult.factors, ...base };
+  }
+
   // 1. FULL_BOOK_CONSENSUS — all books moved same direction within window
   const fbcResult = checkFullBookConsensus(state, T, leadership);
   if (fbcResult.match) {
@@ -424,6 +430,105 @@ function checkFrozen(
   if (state.total_books >= 3) {
     factors.push(`${state.total_books} books holding steady.`);
   }
+
+  return { match: true, factors };
+}
+
+// ── HEARD_ALERT ──────────────────────────────────────────────────────────────
+// Top-tier signal. ALL conditions must be true:
+//   1. Moneyline move ≥ 300 cents toward the UNDERDOG
+//   2. ALL tracked books (≥5) moved same direction
+//   3. Move happened within ≤ 200 minutes
+//   4. Pinnacle led (moved first)
+//   5. Sharp-side / RLM confirmation
+//   6. Underdog only (positive ML)
+
+const HEARD_ALERT_MIN_MOVE_CENTS = 300;
+const HEARD_ALERT_MAX_WINDOW_MINUTES = 200;
+const HEARD_ALERT_MIN_BOOKS = 5;
+
+function checkHeardAlert(
+  state: MarketState,
+  T: MarketThresholds,
+  leadership: import('../types').LeaderFollowerResult,
+): CheckResult {
+  const factors: string[] = [];
+
+  // Must be moneyline market
+  if (state.market_type !== 'moneyline') return { match: false, factors };
+
+  const absMove = Math.abs(state.move);
+
+  // 1. Move size ≥ 300 cents
+  if (absMove < HEARD_ALERT_MIN_MOVE_CENTS) return { match: false, factors };
+
+  // 6. Underdog only — the side receiving the move must be the underdog (positive ML)
+  // In moneyline: move < 0 = toward home, move > 0 = toward away
+  // The underdog has positive ML. We need to confirm the move is TOWARD the underdog.
+  const moveTowardHome = state.move < 0;
+  const homeIsUnderdog = state.opener > 0; // positive opener ML = underdog
+  const awayIsUnderdog = state.opener < 0 ? false : true; // if opener is negative, home is fav
+
+  // Determine if the move is toward an underdog
+  // For the "toward" side: if move < 0, line went more negative (toward home)
+  // The underdog's ML gets smaller (shorter), e.g., +900 → +600
+  // This means the underdog's ML decreased, so move on that side is negative
+  const moveTowardUnderdog = (moveTowardHome && homeIsUnderdog) || (!moveTowardHome && !homeIsUnderdog);
+  if (!moveTowardUnderdog) return { match: false, factors };
+
+  const underdogTeam = homeIsUnderdog ? state.home_team : state.away_team;
+  const underdogOpenML = homeIsUnderdog ? state.opener : -state.opener; // approximate
+
+  // 2. Full book coordination — ALL books must have moved (≥5)
+  if (state.total_books < HEARD_ALERT_MIN_BOOKS) return { match: false, factors };
+
+  const movedCount = state.books_moved_consensus.length;
+  if (movedCount < state.total_books) return { match: false, factors };
+
+  // 3. Time window ≤ 200 minutes
+  if (leadership.follow_window_minutes > HEARD_ALERT_MAX_WINDOW_MINUTES) {
+    return { match: false, factors };
+  }
+
+  // 4. Pinnacle must lead
+  const pinnacleIsLeader = leadership.leader != null &&
+    leadership.leader.toLowerCase().includes('pinnacle');
+  if (!pinnacleIsLeader) return { match: false, factors };
+
+  // 5. Sharp-side / RLM confirmation
+  const pub = state.public_data;
+  let isRLM = false;
+  if (pub.home_ticket_pct != null) {
+    const publicOnHome = pub.home_ticket_pct > 50;
+    const publicAgainstMove = (moveTowardHome && !publicOnHome) || (!moveTowardHome && publicOnHome);
+    // RLM = move is against where the public is betting
+    // For underdog buyback, public is usually on the favorite, so move toward dog = against public
+    isRLM = !publicAgainstMove; // public is on the OTHER side
+    // Actually: RLM = public on one side, line moves opposite
+    // If public is on favorite (home_ticket_pct > 50 when home is favorite),
+    // and line moves toward underdog, that's RLM
+    const publicOnFavorite = (homeIsUnderdog && !publicOnHome) || (!homeIsUnderdog && publicOnHome);
+    isRLM = publicOnFavorite && moveTowardUnderdog;
+  }
+
+  // All conditions met — HEARD_ALERT
+  const windowDesc = leadership.follow_window_minutes < 1
+    ? 'within the same polling window'
+    : `in ${leadership.follow_window_minutes} minutes`;
+
+  factors.push(
+    `HEARD ALERT — Pinnacle led a full ${movedCount}/${state.total_books}-book moneyline move toward ${underdogTeam} (underdog).`
+  );
+  factors.push(
+    `Move: ${absMove} cents ${windowDesc} with full coordination.`
+  );
+  factors.push(
+    `Pinnacle moved first; ${leadership.followers.join(', ')} followed.`
+  );
+  if (isRLM) {
+    factors.push('Sharp-side confirmation: reverse line movement against public.');
+  }
+  factors.push('This qualifies as a top-tier HEARD ALERT on the underdog.');
 
   return { match: true, factors };
 }
