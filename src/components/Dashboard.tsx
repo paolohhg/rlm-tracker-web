@@ -283,10 +283,13 @@ function Badge({ label, color }: { label: string; color: string }) {
 function SignalBadges({ game }: { game: GameView }) {
   const badges: { label: string; color: string }[] = [];
 
-  // Signal badges — in precedence order
-  if (game.signalTier === 'HEARD_ALERT' || game.signalTier === ('HEARD ALERT' as any)) {
-    badges.push({ label: 'HEARD ALERT', color: BADGE_COLORS['HEARD ALERT'] });
+  // HEARD ALERT — data-driven (from heardAlert field, NOT from signalTier text)
+  if (game.heardAlert) {
+    const tierLabel = game.heardAlertTier ? ` (Tier ${game.heardAlertTier})` : '';
+    badges.push({ label: `HEARD ALERT${tierLabel}`, color: BADGE_COLORS['HEARD ALERT'] });
   }
+
+  // Other signal badges — in precedence order
   if (isRlmSignal(game.signalTier)) {
     badges.push({ label: game.signalTier === 'DOUBLE NO-NARRATIVE RLM' ? 'DOUBLE RLM' : 'RLM', color: BADGE_COLORS.RLM });
   }
@@ -565,8 +568,11 @@ function GameTableRow({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameView
       onMouseLeave={() => setHovered(false)}
       onClick={() => onOpenHsa(game)}
       style={{
-        background: hovered ? T.hover : 'transparent',
+        background: game.heardAlert
+          ? (hovered ? 'rgba(255, 0, 64, 0.12)' : 'rgba(255, 0, 64, 0.06)')
+          : (hovered ? T.hover : 'transparent'),
         cursor: 'pointer',
+        ...(game.heardAlert ? { borderLeft: '3px solid #ff0040' } : {}),
         transition: 'background 200ms',
         borderBottom: `1px solid ${T.border}`,
       }}
@@ -800,8 +806,9 @@ function MobileGameCard({ game, ncaabLogos, onOpenHsa, onShare }: { game: GameVi
     <div
       onClick={() => onOpenHsa(game)}
       style={{
-        background: T.panel,
-        border: `1px solid ${T.border}`,
+        background: game.heardAlert ? 'rgba(255, 0, 64, 0.08)' : T.panel,
+        border: game.heardAlert ? '1px solid rgba(255, 0, 64, 0.4)' : `1px solid ${T.border}`,
+        borderLeft: game.heardAlert ? '3px solid #ff0040' : undefined,
         borderRadius: '10px',
         padding: '14px',
         cursor: 'pointer',
@@ -1010,6 +1017,14 @@ export function Dashboard() {
     const q = search.trim().toLowerCase();
     if (q) result = result.filter((g) => g.homeTeam.toLowerCase().includes(q) || g.awayTeam.toLowerCase().includes(q) || g.league.toLowerCase().includes(q));
     result.sort((a, b) => {
+      // HEARD ALERT games always sort to the top
+      if (a.heardAlert && !b.heardAlert) return -1;
+      if (!a.heardAlert && b.heardAlert) return 1;
+      // Within HEARD ALERT, sort by tier (lower = higher priority)
+      if (a.heardAlert && b.heardAlert) {
+        const tierDiff = (a.heardAlertTier ?? 5) - (b.heardAlertTier ?? 5);
+        if (tierDiff !== 0) return tierDiff;
+      }
       const signalDiff = getSignalRank(b.signalTier) - getSignalRank(a.signalTier);
       if (signalDiff !== 0) return signalDiff;
       return a.timeToTipMinutes - b.timeToTipMinutes;

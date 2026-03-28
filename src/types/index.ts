@@ -2,6 +2,8 @@ export type GameStatus = 'upcoming' | 'live' | 'final'
 export type League = 'NBA' | 'NCAAB' | 'NHL' | 'MLB'
 export type Tournament = 'ncaa_tournament' | 'nit' | null
 export type HsaStatus = 'no_narrative' | 'narrative' | 'pending'
+export type SignalState = 'FORMING' | 'ACTIVE' | 'CONFIRMED' | 'DECAYING' | 'EXPIRED' | null
+
 export type SignalTier = 'HEARD_ALERT' | 'HEARD ALERT' | 'FULL_BOOK_CONSENSUS' | 'DOUBLE NO-NARRATIVE RLM' | 'NO-NARRATIVE RLM' | 'STEAM MOVE' | 'BOOK SHADE' | 'SHARP ACCUMULATION' | 'FROZEN LINE' | 'CONTRA MOVE' | 'WATCH' | 'TRACKING' | null
 
 export interface GameView {
@@ -87,6 +89,11 @@ export interface GameView {
   // Confidence (derived from signal tier + market movement)
   sideConfidence: string | null
   totalConfidence: string | null
+
+  // HEARD ALERT — data-driven, never derived from narrative text
+  heardAlert: boolean
+  heardAlertTier: number | null     // 1-5 (1 = highest conviction)
+  signalState: SignalState
 }
 
 export interface FilterState {
