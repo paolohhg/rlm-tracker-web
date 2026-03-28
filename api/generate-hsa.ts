@@ -1006,16 +1006,25 @@ function buildHsaUserMessage(
 ): string {
   const isMLB = league === 'MLB';
 
+  // Helper: format spread with team names (never show raw number without team context)
+  const fmtSpread = (spread: number) => {
+    if (spread === 0) return '—';
+    // Spread is from HOME perspective. Negative = home favored.
+    const homeSpread = spread;
+    const awaySpread = -spread;
+    return `${homeTeam} ${homeSpread > 0 ? '+' : ''}${homeSpread} / ${awayTeam} ${awaySpread > 0 ? '+' : ''}${awaySpread}`;
+  };
+
   const timelineStr = summary.timeline
-    .map((t) => `${t.label}: spread ${t.consensusSpread} | total ${t.consensusTotal} [${t.books.map((b) => `${b.book}: spr=${b.spread}/tot=${b.total}/ML=${b.mlHome}/${b.mlAway}`).join(', ')}]`)
+    .map((t) => `${t.label}: ${fmtSpread(t.consensusSpread)} | total ${t.consensusTotal} [${t.books.map((b) => `${b.book}: ${homeTeam}=${b.spread}/${b.total}/ML${b.mlHome}`).join(', ')}]`)
     .join('\n');
 
   const currentBooksStr = summary.current.books
-    .map((b) => `${b.book}: ML ${b.mlHome}/${b.mlAway} | spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice})`)
+    .map((b) => `${b.book}: ML ${homeTeam} ${b.mlHome} / ${awayTeam} ${b.mlAway} | spread ${homeTeam} ${b.spread > 0 ? '+' : ''}${b.spread} / ${awayTeam} ${-b.spread > 0 ? '+' : ''}${-b.spread} (juice ${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total}`)
     .join('\n');
 
   const openingBooksStr = summary.opening.books
-    .map((b) => `${b.book}: ML ${b.mlHome}/${b.mlAway} | spread ${b.spread} (${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total} (o${b.totalOverPrice > 0 ? '+' : ''}${b.totalOverPrice})`)
+    .map((b) => `${b.book}: ML ${homeTeam} ${b.mlHome} / ${awayTeam} ${b.mlAway} | spread ${homeTeam} ${b.spread > 0 ? '+' : ''}${b.spread} / ${awayTeam} ${-b.spread > 0 ? '+' : ''}${-b.spread} (juice ${b.spreadPrice > 0 ? '+' : ''}${b.spreadPrice}) | total ${b.total}`)
     .join('\n');
 
   // For MLB, determine favorite by moneyline (not spread, which is always ±1.5)
@@ -1076,11 +1085,11 @@ Books: ${summary.books.join(', ')}
 
 OPENING LINES:
 ${openingBooksStr}
-Consensus: spread ${summary.opening.consensusSpread} | total ${summary.opening.consensusTotal} | ML ${summary.opening.consensusMlHome}/${summary.opening.consensusMlAway}
+Consensus: ${fmtSpread(summary.opening.consensusSpread)} | total ${summary.opening.consensusTotal} | ML ${homeTeam} ${summary.opening.consensusMlHome} / ${awayTeam} ${summary.opening.consensusMlAway}
 
 CURRENT LINES:
 ${currentBooksStr}
-Consensus: spread ${summary.current.consensusSpread} | total ${summary.current.consensusTotal} | ML ${summary.current.consensusMlHome}/${summary.current.consensusMlAway}
+Consensus: ${fmtSpread(summary.current.consensusSpread)} | total ${summary.current.consensusTotal} | ML ${homeTeam} ${summary.current.consensusMlHome} / ${awayTeam} ${summary.current.consensusMlAway}
 
 MOVEMENT:
 ${isMLB ? `Moneyline: ${homeTeam} ${summary.mlHomeMovement >= 0 ? '+' : ''}${summary.mlHomeMovement} / ${awayTeam} ${summary.mlAwayMovement >= 0 ? '+' : ''}${summary.mlAwayMovement} (${summary.mlDirection})
@@ -1507,7 +1516,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const spreadOpen = openBook?.spread ?? 0;
       const spreadCurr = b.spread;
       const spreadMoved = spreadOpen !== 0 && spreadCurr !== 0 && spreadOpen !== spreadCurr;
-      rawBookLines.push(`  ${b.book}: spread ${spreadOpen} → ${spreadCurr}${spreadMoved ? ' [MOVED]' : ' [HELD]'} | total ${totalOpen} → ${totalCurr}${totalMoved ? ' [MOVED]' : ' [HELD]'} | ML ${openBook?.mlHome ?? '?'} → ${b.mlHome}`);
+      rawBookLines.push(`  ${b.book}: spread ${home_team} ${spreadOpen > 0 ? '+' : ''}${spreadOpen} → ${spreadCurr > 0 ? '+' : ''}${spreadCurr}${spreadMoved ? ' [MOVED]' : ' [HELD]'} | total ${totalOpen} → ${totalCurr}${totalMoved ? ' [MOVED]' : ' [HELD]'} | ML ${home_team} ${openBook?.mlHome ?? '?'} → ${b.mlHome}`);
     }
 
     // Generate fallback mandatory sentences from raw summary data if coordination returned null
@@ -1562,9 +1571,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const coordBlock = [
       '\n=== BOOK COORDINATION INTEL (USE EXACT BOOK NAMES IN OUTPUT) ===',
-      'IMPORTANT: You MUST use the exact sportsbook names below in sections 1, 2, and 7 of your output.',
-      'Do NOT write "multiple books", "several sportsbooks", or "books coordinated".',
-      'Instead write: "[BookName] and [BookName] moved X → Y, while [BookName] held X."\n',
+      'IMPORTANT: You MUST use the exact sportsbook names below.',
+      `SPREAD TEAM RULE: All spread numbers below are from ${home_team} (HOME) perspective.`,
+      `  If spread is negative (e.g. -1.5), ${home_team} is the favorite.`,
+      `  If spread is positive (e.g. +1.5), ${home_team} is the underdog.`,
+      `  ${away_team}'s spread is ALWAYS the opposite sign.`,
+      `  NEVER say "${away_team} ${summary.current.consensusSpread > 0 ? '+' : ''}${summary.current.consensusSpread}" — that is the HOME team's number.\n`,
       rawBookLines.join('\n'),
       '',
       formatCoordinationBlock('TOTALS', totalCoord),
