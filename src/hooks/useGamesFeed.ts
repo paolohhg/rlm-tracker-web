@@ -269,20 +269,17 @@ function hoursApart(a: string, b: string): number {
 function findBestOddsMatch(tipoff: any, oddsRows: any[]) {
   const matchingLeague = oddsRows.filter((o) => String(o.league).toLowerCase() === String(tipoff.league).toLowerCase());
 
-  const exactTeamMatches = matchingLeague.filter((o) => {
-    return (
-      normalizeTeamName(o.home_team) === normalizeTeamName(tipoff.home_team) &&
-      normalizeTeamName(o.away_team) === normalizeTeamName(tipoff.away_team)
-    );
-  });
+  // STRICT matching only — no fuzzy/substring matching.
+  // Fuzzy matching caused cross-game merges (e.g., "Michigan" matching "Michigan State").
+  const normHome = normalizeTeamName(tipoff.home_team);
+  const normAway = normalizeTeamName(tipoff.away_team);
 
-  const candidateRows = exactTeamMatches.length ? exactTeamMatches : matchingLeague.filter((o) => {
-    return (
-      normalizeTeamName(o.home_team).includes(normalizeTeamName(tipoff.home_team)) ||
-      normalizeTeamName(tipoff.home_team).includes(normalizeTeamName(o.home_team)) ||
-      normalizeTeamName(o.away_team).includes(normalizeTeamName(tipoff.away_team)) ||
-      normalizeTeamName(tipoff.away_team).includes(normalizeTeamName(o.away_team))
-    );
+  const candidateRows = matchingLeague.filter((o) => {
+    const oHome = normalizeTeamName(o.home_team);
+    const oAway = normalizeTeamName(o.away_team);
+    // Exact match (including reversed home/away for neutral-site games)
+    return (oHome === normHome && oAway === normAway) ||
+           (oHome === normAway && oAway === normHome);
   });
 
   if (!candidateRows.length) {
@@ -637,7 +634,37 @@ export function useGamesFeed() {
         }
       }
 
-      const gameViews: GameView[] = uniqueTipoffs.map((t) => {
+      // ── Hard guards: reject malformed matchups ──────────────────
+      // A game card must only render if it has valid, unambiguous identity.
+      // Prefer dropping a questionable game over rendering a fake one.
+      const validTipoffs = uniqueTipoffs.filter((t) => {
+        // Must have both teams
+        if (!t.home_team || !t.away_team) return false;
+
+        // Teams must be different
+        const normH = normalizeTeamName(t.home_team);
+        const normA = normalizeTeamName(t.away_team);
+        if (normH === normA) {
+          console.warn(`[GAME GUARD] Rejected: same team on both sides: ${t.home_team} vs ${t.away_team}`);
+          return false;
+        }
+
+        // Must have a league
+        if (!t.league) return false;
+
+        // Must have a game_time
+        if (!t.game_time) return false;
+
+        // Reject if team name is too short (likely malformed)
+        if (normH.length < 3 || normA.length < 3) {
+          console.warn(`[GAME GUARD] Rejected: team name too short: "${t.home_team}" vs "${t.away_team}"`);
+          return false;
+        }
+
+        return true;
+      });
+
+      const gameViews: GameView[] = validTipoffs.map((t) => {
         const fallbackKey = buildMatchKey(t.league, t.home_team, t.away_team);
 
         const score = scoreByGameId[t.game_id] ?? null;
@@ -646,24 +673,13 @@ export function useGamesFeed() {
         const split = splitsMap[fallbackKey] ?? null;
         const bestOdds = findBestOddsMatch(t, odds);
 
-        // ESPN live score — try exact key first, then fuzzy partial match
+        // ESPN live score — strict matching only (no fuzzy substring matching).
+        // Fuzzy matching caused scores from wrong games to appear on cards.
         const normHome = normalizeTeamName(t.home_team);
         const normAway = normalizeTeamName(t.away_team);
         const espnKey = `${normHome}|${normAway}`;
-        let espn = espnScores[espnKey] ?? null;
-
-        if (!espn) {
-          const fuzzyKey = Object.keys(espnScores).find((k) => {
-            const [h, a] = k.split('|');
-            const homeMatch = h.includes(normHome) || normHome.includes(h);
-            const awayMatch = a.includes(normAway) || normAway.includes(a);
-            // Also try reversed — neutral-site tournament games often have different home/away
-            const revHomeMatch = h.includes(normAway) || normAway.includes(h);
-            const revAwayMatch = a.includes(normHome) || normHome.includes(a);
-            return (homeMatch && awayMatch) || (revHomeMatch && revAwayMatch);
-          });
-          if (fuzzyKey) espn = espnScores[fuzzyKey];
-        }
+        const espnKeyReversed = `${normAway}|${normHome}`;
+        let espn = espnScores[espnKey] ?? espnScores[espnKeyReversed] ?? null;
 
         const minutesFromNow = deriveTimeToTip(t.game_time);
 
