@@ -578,8 +578,14 @@ export function useGamesFeed() {
       // Synthesize tipoff entries from odds_snapshots for games not in tipoff_snapshots
       // (e.g. NIT, CBI, and other postseason games that The Odds API includes but the
       // RLM detection service hasn't processed yet)
+      // Only synthesize games from odds that haven't finished yet
+      // (game_time in the future or within last 4 hours for live games)
+      const cutoffTime = Date.now() - 4 * 60 * 60 * 1000;
       const oddsGames = new Map<string, any>();
       for (const o of odds) {
+        // Skip odds for games that have already finished
+        if (o.game_time && new Date(o.game_time).getTime() < cutoffTime) continue;
+
         const key = buildMatchKey(o.league, o.home_team, o.away_team);
         if (!oddsGames.has(key)) {
           oddsGames.set(key, o);
@@ -612,9 +618,13 @@ export function useGamesFeed() {
         }
       }
 
-      // Synthesize tipoff entries from ESPN schedule for games not in DB
-      // (catches NIT, CBI, and other tournaments before odds are published)
+      // Synthesize tipoff entries from ESPN schedule for games not in DB.
+      // Only add UPCOMING or LIVE games — do NOT add finished games.
+      // Finished ESPN games without odds data are not useful on the dashboard.
       for (const eg of espnGames) {
+        // Skip finished games that have no odds tracking
+        if (eg.status === 'final') continue;
+
         const key = buildMatchKey(eg.league, eg.homeTeam, eg.awayTeam);
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
