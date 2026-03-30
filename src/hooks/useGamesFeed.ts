@@ -76,6 +76,65 @@ function deriveTotalConfidence(
   return null;
 }
 
+// ── HEARD ALERT computation (data-driven, never from narrative) ───────────
+
+// Signal tier → numeric tier (1 = highest conviction, 5 = lowest)
+const SIGNAL_TIER_MAP: Record<string, number> = {
+  'HEARD_ALERT': 1,
+  'HEARD ALERT': 1,
+  'DOUBLE NO-NARRATIVE RLM': 1,
+  'FULL_BOOK_CONSENSUS': 1,
+  'NO-NARRATIVE RLM': 2,
+  'STEAM MOVE': 2,
+  'SHARP ACCUMULATION': 3,
+  'BOOK SHADE': 4,
+  'CONTRA MOVE': 4,
+  'FROZEN LINE': 5,
+  'WATCH': 5,
+  'TRACKING': 5,
+};
+
+function computeHeardAlert(
+  signalTier: string | null,
+  confidenceScore: number | null,
+  lineMoveAmount: number | null,
+  _league: string,
+  openMlHome: number | null,
+  currMlHome: number | null,
+): { heardAlert: boolean; heardAlertTier: number | null; signalState: import('../types').SignalState } {
+  if (!signalTier) return { heardAlert: false, heardAlertTier: null, signalState: null };
+
+  const tier = SIGNAL_TIER_MAP[signalTier] ?? 5;
+
+  // Determine signal state from movement magnitude and confidence
+  let signalState: import('../types').SignalState = null;
+
+  const absSpreadMove = Math.abs(lineMoveAmount ?? 0);
+  const absMlMove = (openMlHome != null && currMlHome != null) ? Math.abs(currMlHome - openMlHome) : 0;
+  const hasMovement = absSpreadMove > 0 || absMlMove >= 3;
+
+  if (!hasMovement && tier >= 4) {
+    signalState = null; // No real activity
+  } else if (tier <= 2 && (confidenceScore ?? 0) >= 70) {
+    signalState = 'CONFIRMED';
+  } else if (tier <= 3 && hasMovement) {
+    signalState = 'ACTIVE';
+  } else if (hasMovement) {
+    signalState = 'FORMING';
+  } else if (tier <= 3) {
+    signalState = 'DECAYING'; // Had a signal but movement not confirmed
+  }
+
+  // HEARD ALERT triggers only on ACTIVE or CONFIRMED with tier 1-3
+  const heardAlert = (signalState === 'ACTIVE' || signalState === 'CONFIRMED') && tier <= 3;
+
+  return {
+    heardAlert,
+    heardAlertTier: heardAlert ? tier : null,
+    signalState,
+  };
+}
+
 function deriveFallbackStatus(gameTime: string): GameStatus {
   const now = Date.now();
   const tip = new Date(gameTime).getTime();
@@ -882,6 +941,17 @@ export function useGamesFeed() {
             split?.total_under_ticket_pct ?? null,
             split?.total_over_money_pct ?? null,
             split?.total_under_money_pct ?? null,
+          ),
+
+          // HEARD ALERT — data-driven, never derived from narrative text.
+          // Computed from signal tier + signal state. Must be structured data.
+          ...computeHeardAlert(
+            alert?.signal_tier ?? alert?.overall_badge ?? t.signal_tier ?? null,
+            alert?.confidence_score ?? null,
+            lineMoveAmount,
+            t.league as string,
+            openingMoneylineHome as number | null,
+            moneylineHome as number | null,
           ),
         };
       });
