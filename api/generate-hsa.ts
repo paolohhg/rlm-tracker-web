@@ -1381,6 +1381,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Preprocess clean odds into structured summary
     const summary = summarizeOdds(cleanSnapshots, game_time, league);
 
+    // ── True Open Engine — replaces flawed opener logic ────────────
+    // Computes book-level true opens, consensus, market path, structure,
+    // and reliability. This is the authoritative open for HSA narration.
+    let trueOpenBlock = '';
+    try {
+      const { computeAllMarketOpens, formatTrueOpenForHSA } = await import('./lib/true-open-engine');
+      const trueOpens = computeAllMarketOpens(cleanSnapshots as any, league, gameId, game_time);
+
+      const spreadOpen = formatTrueOpenForHSA(trueOpens.spread);
+      const totalOpen = formatTrueOpenForHSA(trueOpens.total);
+      const mlOpen = formatTrueOpenForHSA(trueOpens.moneyline);
+
+      trueOpenBlock = [
+        '\n=== TRUE OPEN DATA (AUTHORITATIVE — USE INSTEAD OF RAW OPENER) ===',
+        'IMPORTANT: The true opens below were computed from the earliest trustworthy',
+        'recorded numbers per book. Use these instead of any "opening" values in the',
+        'raw market data above. If structure is "reversal", the market did NOT move',
+        'one-way — describe the full path.',
+        '',
+        spreadOpen,
+        '',
+        totalOpen,
+        '',
+        mlOpen,
+      ].join('\n');
+
+      console.log(`[HSA TRUE OPEN] Spread: ${trueOpens.spread.consensus.trueOpen} (${trueOpens.spread.consensus.structure}, ${trueOpens.spread.consensus.confidenceLabel})`);
+      console.log(`[HSA TRUE OPEN] Total: ${trueOpens.total.consensus.trueOpen} (${trueOpens.total.consensus.structure}, ${trueOpens.total.consensus.confidenceLabel})`);
+      console.log(`[HSA TRUE OPEN] ML: ${trueOpens.moneyline.consensus.trueOpen} (${trueOpens.moneyline.consensus.structure}, ${trueOpens.moneyline.consensus.confidenceLabel})`);
+    } catch (err: any) {
+      console.error('[HSA TRUE OPEN] Engine failed (non-fatal):', err.message);
+    }
+
     // Compute deterministic snapshot ID from current book lines
     // Same set of per-book lines → same ID → deterministic analysis
     const snapshotId = computeSnapshotId(cleanSnapshots, league, home_team, away_team);
@@ -1833,8 +1866,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Build prompt and call Claude with system prompt
     const userMessage = buildHsaUserMessage(league, away_team, home_team, game_time, summary, splitsData, totalsSplitsData);
 
-    // Append lifecycle context, coordination intel, lean directive, confidence directive, MLB truth, and NHL classification
+    // Append all context blocks to the user message
     const fullMessage = userMessage + '\n\n' + lifecycleBlock + '\n\n' + coordBlock
+      + (trueOpenBlock ? '\n\n' + trueOpenBlock : '')
       + (leanDirective ? '\n\n' + leanDirective : '')
       + (confidenceDirective ? '\n\n' + confidenceDirective : '')
       + (mlbTruthBlock ? '\n\n' + mlbTruthBlock : '')
