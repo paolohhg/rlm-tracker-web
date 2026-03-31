@@ -480,12 +480,13 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
   const mlAwayMovement = (openingConsensusMlAway !== 0 && currentConsensusMlAway !== 0)
     ? currentConsensusMlAway - openingConsensusMlAway : 0;
 
-  // ML direction: if home ML gets more negative, home is being bet (favorite strengthening)
-  // If away ML gets less positive, away is being bet (underdog shortening)
+  // ML direction: describe which team the market is moving toward.
+  // mlHomeMovement < 0 = home ML getting more negative = home strengthening as favorite
+  // mlHomeMovement > 0 = home ML getting less negative or more positive = home weakening
   const mlDirection =
     (Math.abs(mlHomeMovement) < 3 && Math.abs(mlAwayMovement) < 3) ? 'stable'
-      : mlHomeMovement < 0 ? 'toward home favorite (ML shortening)'
-        : mlHomeMovement > 0 ? 'toward away / home underdog (home ML drifting)'
+      : mlHomeMovement < 0 ? 'home ML strengthening (getting more negative)'
+        : mlHomeMovement > 0 ? 'home ML weakening (getting less negative / more positive)'
           : 'stable';
 
   const spreadDirection =
@@ -1092,7 +1093,12 @@ ${currentBooksStr}
 Consensus: ${fmtSpread(summary.current.consensusSpread)} | total ${summary.current.consensusTotal} | ML ${homeTeam} ${summary.current.consensusMlHome} / ${awayTeam} ${summary.current.consensusMlAway}
 
 MOVEMENT:
-${isMLB ? `Moneyline: ${homeTeam} ${summary.mlHomeMovement >= 0 ? '+' : ''}${summary.mlHomeMovement} / ${awayTeam} ${summary.mlAwayMovement >= 0 ? '+' : ''}${summary.mlAwayMovement} (${summary.mlDirection})
+${isMLB ? `Moneyline: ${homeTeam} ${summary.mlHomeMovement >= 0 ? '+' : ''}${summary.mlHomeMovement} / ${awayTeam} ${summary.mlAwayMovement >= 0 ? '+' : ''}${summary.mlAwayMovement}
+ML DIRECTION: ${summary.mlHomeMovement > 0
+  ? `Line moved AWAY from ${homeTeam} and TOWARD ${awayTeam} (${homeTeam} ML weakened from ${summary.opening.consensusMlHome} to ${summary.current.consensusMlHome})`
+  : summary.mlHomeMovement < 0
+    ? `Line moved TOWARD ${homeTeam} (${homeTeam} ML strengthened from ${summary.opening.consensusMlHome} to ${summary.current.consensusMlHome})`
+    : 'ML stable'}
 ` : ''}Spread: ${summary.spreadMovement > 0 ? '+' : ''}${summary.spreadMovement} (${summary.spreadDirection})
 Total: ${summary.totalMovement > 0 ? '+' : ''}${summary.totalMovement} (${summary.totalDirection})
 Velocity: ${summary.velocityPerHour} pts/hr
