@@ -544,11 +544,9 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
       // NHL puck-line state flip: don't describe as numeric point move
       const prevSpread = timeline[i - 1].consensusSpread;
       const currSpread = timeline[i].consensusSpread;
-      const isNhlPucklineFlip = league === 'NHL' && (
-        (prevSpread === -1.5 && currSpread === 1.5) ||
-        (prevSpread === 1.5 && currSpread === -1.5) ||
-        (prevSpread === -1.5 && currSpread === -1.5) === false // type guard
-      ) && Math.abs(prevSpread) === 1.5 && Math.abs(currSpread) === 1.5 && prevSpread !== currSpread;
+      const isNhlPucklineFlip = league === 'NHL' &&
+        ((prevSpread === -1.5 && currSpread === 1.5) ||
+         (prevSpread === 1.5 && currSpread === -1.5));
       if (isNhlPucklineFlip) {
         steamDetail = `Puck-line state flip (${prevSpread} → ${currSpread}) in ~${timeDiff} min (${timeline[i - 1].label} to ${timeline[i].label})`;
       } else {

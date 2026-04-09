@@ -142,7 +142,7 @@ const caseB = getNhlSignalType(baseInput({
 }));
 
 assert(caseB.signal_type === 'CONFIRMED_RLM', 'Case B: signal_type = CONFIRMED_RLM');
-assert(caseB.confidence === 'HIGH' || caseB.confidence === 'MODERATE', 'Case B: confidence >= MODERATE');
+assert(caseB.confidence === 'HIGH', 'Case B: confidence = HIGH (3+ books + ML confirms + persists)');
 assert(caseB.puckline_state_flip === true, 'Case B: puckline_state_flip = true');
 
 // ── CASE C: One rogue book flips while rest hold ─────────────────────────────
@@ -251,30 +251,31 @@ assert(caseH.confidence === 'LOW', 'Case H: confidence = LOW');
 // ── Nashville @ Chicago example ──────────────────────────────────────────────
 
 console.log('\n=== Nashville @ Chicago Example ===');
-// Nashville @ Chicago: public on Nashville (away), but here we model
-// public tickets on Chicago (home) with the line moving against them.
-// Per the spec: "reverse line movement toward Chicago against public Nashville tickets"
-// means public is on Nashville but the lean is toward Chicago +1.5.
-// For RLM, public side is "away" (Nashville) and line must move toward_home.
-// So: opening +1.5 → current -1.5 would be toward_home. But the lean says +1.5...
+// Spec scenario: Nashville @ Chicago (Nashville away, Chicago home)
+// - Public roughly on Nashville (62% away = 38% home)
+// - Some books flip Chicago puck line from -1.5 (fav) to +1.5 (dog)
+// - Moneyline shortened toward Chicago (ML moves toward_home)
+// - Only 2 books confirmed the puck-line flip
+// - Market is split
 //
-// The spec scenario: public on Nashville, some books flip Chicago from fav to dog.
-// We model: public on Chicago (home 60%), line moves toward_away = RLM against public.
+// Because ML is the primary NHL indicator, the lean follows ML direction
+// toward Chicago. The puck-line state flip is secondary / chaotic.
+// Expected: PARTIAL_SHARP_ENTRY, SPLIT_MARKET, MODERATE, lean = Chicago +1.5
 const nashvilleChicago = getNhlSignalType(baseInput({
   homeTeam: 'Chicago Blackhawks',
   awayTeam: 'Nashville Predators',
-  openingSpread: -1.5,
-  currentSpread: 1.5,
+  openingSpread: -1.5,        // Chicago was PL favorite
+  currentSpread: 1.5,         // Some books flipped to Chicago underdog (state flip)
   spreadBooksMovedCount: 2,
   spreadBooksHeldCount: 2,
   spreadBooksMoved: ['DraftKings', 'FanDuel'],
   spreadBooksHeld: ['BetMGM', 'ESPNBet'],
   spreadMoveTimeWindowMinutes: 20,
-  openingMlHome: -130,
-  currentMlHome: -120,
-  mlBooksMovedCount: 1,
-  mlDirection: 'toward_away',
-  publicTicketPctHome: 60, // public on Chicago (home), line moved away = RLM
+  openingMlHome: 130,         // Chicago was ML underdog
+  currentMlHome: 110,         // ML shortened toward Chicago
+  mlBooksMovedCount: 2,
+  mlDirection: 'toward_home', // ML moved toward Chicago (primary indicator)
+  publicTicketPctHome: 38,    // 62% on Nashville (public on Nashville)
   publicMoneyPctHome: 45,
   movePersistedSnapshots: 2,
   hasSnappedBack: false,
@@ -286,9 +287,59 @@ assert(nashvilleChicago.signal_type === 'PARTIAL_SHARP_ENTRY', 'Nashville@Chicag
 assert(nashvilleChicago.secondary_tag === 'SPLIT_MARKET', 'Nashville@Chicago: secondary_tag = SPLIT_MARKET');
 assert(nashvilleChicago.confidence === 'MODERATE', 'Nashville@Chicago: confidence = MODERATE');
 assert(nashvilleChicago.status === 'NEEDS_CONFIRMATION', 'Nashville@Chicago: status = NEEDS_CONFIRMATION');
+assert(nashvilleChicago.lean === 'Chicago Blackhawks +1.5', 'Nashville@Chicago: lean = Chicago Blackhawks +1.5');
 assert(nashvilleChicago.puckline_state_flip === true, 'Nashville@Chicago: puckline_state_flip = true');
 assert(!nashvilleChicago.explanation.includes('3-point'), 'Nashville@Chicago: no "3-point" language');
 assert(!nashvilleChicago.explanation.includes('steam'), 'Nashville@Chicago: no "steam" language');
+
+// ── CASE I: ML-driven lean when ML and puck line disagree ───────────────────
+
+console.log('\n=== CASE I: ML-driven lean overrides puck-line direction ===');
+// Puck line moves toward_away but ML moves toward_home.
+// NHL priority: ML is primary, so lean should follow ML direction.
+const caseI = getNhlSignalType(baseInput({
+  openingSpread: -1.5,
+  currentSpread: 1.5,        // PL state flip toward away
+  spreadBooksMovedCount: 2,
+  spreadBooksHeldCount: 2,
+  spreadBooksMoved: ['DraftKings', 'FanDuel'],
+  spreadBooksHeld: ['BetMGM', 'ESPNBet'],
+  spreadMoveTimeWindowMinutes: 25,
+  openingMlHome: 140,
+  currentMlHome: 115,        // ML moved toward home (Chicago)
+  mlBooksMovedCount: 2,
+  mlDirection: 'toward_home',
+  publicTicketPctHome: 40,   // 60% on Nashville (public on away)
+  publicMoneyPctHome: 42,
+  movePersistedSnapshots: 2,
+}));
+
+assert(caseI.lean.includes('Chicago'), 'Case I: lean follows ML direction (Chicago), not PL');
+assert(caseI.puckline_state_flip === true, 'Case I: puckline_state_flip detected');
+assert(caseI.confidence !== 'HIGH', 'Case I: not HIGH confidence (only 2 books)');
+
+// ── CASE J: ML has no signal, falls back to spread direction ────────────────
+
+console.log('\n=== CASE J: ML silent, lean falls back to spread direction ===');
+const caseJ = getNhlSignalType(baseInput({
+  openingSpread: -1.5,
+  currentSpread: 1.5,
+  spreadBooksMovedCount: 2,
+  spreadBooksHeldCount: 2,
+  spreadBooksMoved: ['DraftKings', 'FanDuel'],
+  spreadBooksHeld: ['BetMGM', 'ESPNBet'],
+  spreadMoveTimeWindowMinutes: 20,
+  openingMlHome: -130,
+  currentMlHome: -128,       // ML barely moved (no signal)
+  mlBooksMovedCount: 0,
+  mlDirection: 'none',       // No ML direction
+  publicTicketPctHome: 60,   // Public on Chicago (home), spread moved away = RLM
+  publicMoneyPctHome: 50,
+}));
+
+// With ML silent, falls back to spread direction (toward_away = Nashville)
+assert(caseJ.lean.includes('Nashville'), 'Case J: lean falls back to spread direction when ML silent');
+assert(caseJ.signal_type === 'PARTIAL_SHARP_ENTRY', 'Case J: still detects PARTIAL_SHARP_ENTRY from spread');
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 

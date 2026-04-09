@@ -142,39 +142,37 @@ export function getNhlTimeBucket(minutes: number): NhlTimeBucket {
 }
 
 /**
- * Check if the moneyline confirms the spread/puck-line direction.
+ * Check if ML and spread/puck-line directions agree.
  *
- * For NHL, if the spread moved toward the away team (home spread went from
- * -1.5 to +1.5, i.e. home is now underdog), the ML should also be moving
- * toward the away team (home ML getting more positive / less negative).
+ * Used for puck-line confidence scoring — when ML and spread agree,
+ * the puck-line signal is stronger. When they disagree, the puck-line
+ * flip is likely noise or liability-driven.
  */
-function mlConfirmsSpreadDirection(
-  openingMlHome: number,
-  currentMlHome: number,
+function mlAndSpreadDirectionsAgree(
+  mlDirection: 'toward_home' | 'toward_away' | 'none',
   spreadDirection: 'toward_home' | 'toward_away' | 'none',
 ): boolean {
-  if (spreadDirection === 'none') return false;
-  const mlMove = currentMlHome - openingMlHome;
-  // ML moving positive = away team becoming more favored
-  // ML moving negative = home team becoming more favored
-  if (spreadDirection === 'toward_away' && mlMove > 5) return true;
-  if (spreadDirection === 'toward_home' && mlMove < -5) return true;
-  return false;
+  if (mlDirection === 'none' || spreadDirection === 'none') return false;
+  return mlDirection === spreadDirection;
 }
 
 /**
  * Detect if RLM (reverse line movement) exists:
- * public favors one side, line moves the other way.
+ * public favors one side, market moves the other way.
+ *
+ * For NHL, this uses the PRIMARY direction (ML-first) rather than
+ * spread direction alone, because moneyline is the cleaner sharp
+ * indicator for hockey.
  */
 function detectRlm(
   publicTicketPctHome: number,
-  spreadDirection: 'toward_home' | 'toward_away' | 'none',
+  primaryDirection: 'toward_home' | 'toward_away' | 'none',
 ): boolean {
-  if (spreadDirection === 'none') return false;
+  if (primaryDirection === 'none') return false;
   const publicSide = publicTicketPctHome >= 50 ? 'home' : 'away';
-  // RLM = line moves OPPOSITE to where public money is
-  if (publicSide === 'home' && spreadDirection === 'toward_away') return true;
-  if (publicSide === 'away' && spreadDirection === 'toward_home') return true;
+  // RLM = market moves OPPOSITE to where public tickets are
+  if (publicSide === 'home' && primaryDirection === 'toward_away') return true;
+  if (publicSide === 'away' && primaryDirection === 'toward_home') return true;
   return false;
 }
 
@@ -200,35 +198,44 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
   const coordTier = getNhlCoordinationTier(input.spreadBooksMovedCount);
   const timeBucket = getNhlTimeBucket(input.spreadMoveTimeWindowMinutes);
 
-  // Determine spread direction
+  // Determine spread (puck-line) direction
   const spreadDelta = input.currentSpread - input.openingSpread;
   const spreadDirection: 'toward_home' | 'toward_away' | 'none' =
     spreadDelta < -0.1 ? 'toward_home' :
     spreadDelta > 0.1 ? 'toward_away' : 'none';
 
-  const hasRlm = detectRlm(input.publicTicketPctHome, spreadDirection);
-  const mlConfirms = mlConfirmsSpreadDirection(
-    input.openingMlHome, input.currentMlHome, spreadDirection,
-  );
+  // NHL PRIORITY: moneyline is the primary sharp indicator.
+  // When ML has a directional signal, it overrides puck-line direction
+  // for RLM detection and lean computation.
+  const primaryDirection: 'toward_home' | 'toward_away' | 'none' =
+    input.mlDirection !== 'none' ? input.mlDirection : spreadDirection;
 
-  // Build lean label — currentSpread is from HOME perspective
-  // toward_home: show home team + home spread
-  // toward_away: show away team + flipped spread
-  const leanTeam = spreadDirection === 'toward_home' ? input.homeTeam :
-                   spreadDirection === 'toward_away' ? input.awayTeam : 'PASS';
-  const leanSpread = spreadDirection === 'toward_away' ? -input.currentSpread : input.currentSpread;
-  const leanLine = spreadDirection !== 'none'
+  const hasRlm = detectRlm(input.publicTicketPctHome, primaryDirection);
+
+  // ML confirms the lean direction (true when ML drives the lean, or agrees with spread)
+  const mlConfirmsLean = primaryDirection !== 'none' && input.mlDirection === primaryDirection;
+  // ML and spread agree on direction (used for puck-line confidence scoring)
+  const mlSpreadAgree = mlAndSpreadDirectionsAgree(input.mlDirection, spreadDirection);
+
+  // Build lean label based on PRIMARY direction (ML-first for NHL).
+  // currentSpread is from HOME perspective:
+  //   toward_home → show home team + home spread
+  //   toward_away → show away team + flipped spread
+  const leanTeam = primaryDirection === 'toward_home' ? input.homeTeam :
+                   primaryDirection === 'toward_away' ? input.awayTeam : 'PASS';
+  const leanSpread = primaryDirection === 'toward_away' ? -input.currentSpread : input.currentSpread;
+  const leanLine = primaryDirection !== 'none'
     ? `${leanTeam} ${leanSpread > 0 ? '+' : ''}${leanSpread}`
     : 'PASS';
 
   // ── NHL Weighted Score ─────────────────────────────────────────────────
   const adjustments: string[] = [];
 
-  // Moneyline (max 40)
+  // Moneyline (max 40) — primary NHL indicator
   let mlScore = 0;
-  if (mlConfirms && input.mlBooksMovedCount >= 3) mlScore = 40;
-  else if (mlConfirms && input.mlBooksMovedCount >= 2) mlScore = 30;
-  else if (mlConfirms) mlScore = 20;
+  if (mlConfirmsLean && input.mlBooksMovedCount >= 3) mlScore = 40;
+  else if (mlConfirmsLean && input.mlBooksMovedCount >= 2) mlScore = 30;
+  else if (mlConfirmsLean) mlScore = 20;
   else if (input.mlDirection !== 'none') mlScore = 10;
 
   // Public vs price divergence (max 20)
@@ -248,10 +255,10 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
   else if (coordTier === 'PARTIAL') coordScore = 8;
   else coordScore = 2;
 
-  // Puck line (max 10)
+  // Puck line (max 10) — secondary to ML for NHL
   let puckScore = 0;
-  if (isStateFlip && mlConfirms) puckScore = 10;
-  else if (isStateFlip && !mlConfirms) puckScore = 3; // state flip without ML = weak
+  if (isStateFlip && mlSpreadAgree) puckScore = 10; // PL and ML agree = strong
+  else if (isStateFlip && !mlSpreadAgree) puckScore = 3; // state flip without ML agreement = weak
   else if (Math.abs(spreadDelta) >= 0.5) puckScore = 6;
 
   // Velocity/timing (max 5)
@@ -276,7 +283,7 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
     rawTotal -= 10;
     adjustments.push('Downgrade: fake steam detector triggered');
   }
-  if (isStateFlip && !mlConfirms) {
+  if (isStateFlip && !mlSpreadAgree) {
     rawTotal -= 8;
     adjustments.push('Downgrade: puck-line state flip without ML confirmation');
   }
@@ -292,9 +299,9 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
   }
 
   // ── Auto-upgrade conditions ────────────────────────────────────────────
-  if (input.spreadBooksMovedCount >= 3 && mlConfirms) {
+  if (input.spreadBooksMovedCount >= 3 && mlConfirmsLean) {
     rawTotal += 5;
-    adjustments.push('Upgrade: 3+ books + ML confirms');
+    adjustments.push('Upgrade: 3+ books + ML confirms lean direction');
   }
   if (input.movePersistedSnapshots >= 3 && input.spreadBooksMovedCount >= 2) {
     rawTotal += 5;
@@ -355,7 +362,7 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
     // If fake steam is also triggered, cap at MODERATE
     const confidence: NhlConfidence =
       input.fakeSteamTriggered ? 'MODERATE' :
-      (rawTotal >= 70 && mlConfirms) ? 'HIGH' : 'MODERATE';
+      (rawTotal >= 70 && mlConfirmsLean) ? 'HIGH' : 'MODERATE';
 
     return {
       signal_type: 'CONFIRMED_RLM',
@@ -370,7 +377,7 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
       } but the market moved toward ${leanTeam}. ${
         input.spreadBooksMovedCount
       } books coordinated in the move${
-        mlConfirms ? ', and the moneyline confirms the direction' : ''
+        mlConfirmsLean ? ', and the moneyline confirms the direction' : ''
       }. ${isStateFlip ? 'The puck line flipped state from favorite to underdog pricing.' : ''}`,
       score_breakdown: scoreBreakdown,
     };
@@ -379,8 +386,7 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
   // PARTIAL_SHARP_ENTRY: RLM exists but only 2 books, or incomplete confirmation
   if (hasRlm && input.spreadBooksMovedCount >= 2) {
     // Hard cap: 2-book move can never be HIGH
-    const confidence: NhlConfidence =
-      (rawTotal >= 55 && mlConfirms) ? 'MODERATE' : 'MODERATE';
+    const confidence: NhlConfidence = 'MODERATE';
 
     const secondaryTag: NhlSideSignalType | undefined =
       (input.spreadBooksMovedCount <= input.spreadBooksHeldCount) ? 'SPLIT_MARKET' : undefined;
@@ -400,9 +406,9 @@ export function getNhlSignalType(input: NhlClassifierInput): NhlSideClassificati
         input.spreadBooksMovedCount + input.spreadBooksHeldCount
       } books confirmed the move. ${
         isStateFlip
-          ? 'The puck line flipped state, but broad coordination is still incomplete.'
-          : 'Because confirmation is incomplete, this is classified as a partial sharp entry rather than confirmed steam.'
-      }${!mlConfirms ? ' Moneyline has not confirmed the direction.' : ''}`,
+          ? 'Because the puck line flipped state without broad coordination, this is better classified as a partial sharp entry inside a split market. Confirmation is still needed.'
+          : 'Because confirmation is incomplete, this is classified as a partial sharp entry rather than a confirmed sharp signal.'
+      }${!mlConfirmsLean ? ' Moneyline has not confirmed the direction.' : ''}`,
       score_breakdown: scoreBreakdown,
     };
   }
