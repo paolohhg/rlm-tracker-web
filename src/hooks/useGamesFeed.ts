@@ -564,9 +564,9 @@ export function useGamesFeed() {
         supabase.from('tipoff_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).order('game_time', { ascending: true }),
         supabase.from('rlm_alerts').select('*').gte('detected_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()).order('detected_at', { ascending: false }),
         // Fetch odds for games from 4h ago through 7 days ahead.
-        // Use limit(3000) to ensure upcoming MLB/NHL games aren't crowded
-        // out by today's high-frequency NBA/NCAAB snapshots.
-        supabase.from('odds_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).lte('game_time', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()).order('fetched_at', { ascending: false }).limit(3000),
+        // limit(5000) ensures all leagues (MLB/NHL/NBA) are represented
+        // even with high-frequency polling across many bookmakers.
+        supabase.from('odds_snapshots').select('*').gte('game_time', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()).lte('game_time', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()).order('fetched_at', { ascending: false }).limit(5000),
         // Only fetch the latest analysis per game (is_latest=true).
         // Fallback: if is_latest column doesn't exist yet, the query still works
         // (Supabase ignores unknown filter values gracefully for boolean columns).
@@ -658,6 +658,28 @@ export function useGamesFeed() {
         uniqueTipoffs.push(t);
       }
 
+      // Synthesize tipoff entries from rlm_alerts — the detect-rlm engine writes
+      // alerts here (not tipoff_snapshots), so any game the engine processed
+      // should appear on the dashboard even if tipoff_snapshots is empty.
+      for (const a of alerts) {
+        if (!a.game_time) continue;
+        const key = buildMatchKey(a.league, a.home_team, a.away_team);
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        uniqueTipoffs.push({
+          game_id: null,
+          league: a.league,
+          home_team: a.home_team,
+          away_team: a.away_team,
+          game_time: a.game_time,
+          signal_tier: a.signal_tier ?? null,
+          sharp_team: a.sharp_team ?? null,
+          scenario_key: a.scenario_key ?? null,
+          is_locked: false,
+          created_at: a.detected_at ?? new Date().toISOString(),
+        });
+      }
+
       // Synthesize tipoff entries from odds_snapshots for games not in tipoff_snapshots
       // (e.g. NIT, CBI, and other postseason games that The Odds API includes but the
       // RLM detection service hasn't processed yet)
@@ -701,23 +723,26 @@ export function useGamesFeed() {
         }
       }
 
-      // Synthesize tipoff entries from ESPN schedule — but ONLY for games
-      // that have odds data. ESPN-only games with no odds are noise on a
-      // betting intelligence dashboard and create ghost cards with all dashes.
+      // Synthesize tipoff entries from ESPN schedule for major leagues.
+      // Major leagues (NBA, MLB, NHL) always appear — ESPN is authoritative.
+      // Other leagues require odds confirmation to avoid ghost cards.
+      const MAJOR_LEAGUES = new Set(['NBA', 'MLB', 'NHL']);
       for (const eg of espnGames) {
         if (eg.status === 'final') continue;
 
         const key = buildMatchKey(eg.league, eg.homeTeam, eg.awayTeam);
         if (seenKeys.has(key)) continue; // Already in tipoffs or odds
 
-        // Check if this ESPN game has ANY odds data
-        const hasOdds = odds.some(o => {
-          const oKey = buildMatchKey(o.league, o.home_team, o.away_team);
-          return oKey === key;
-        });
-
-        // Only add ESPN games that have odds tracking OR are live
-        if (!hasOdds && eg.status !== 'live') continue;
+        // Major leagues always show from ESPN — they're real scheduled games.
+        // Non-major leagues (NCAAB etc.) still require odds confirmation
+        // to avoid ghost cards from minor tournaments with no market data.
+        if (!MAJOR_LEAGUES.has(eg.league)) {
+          const hasOdds = odds.some(o => {
+            const oKey = buildMatchKey(o.league, o.home_team, o.away_team);
+            return oKey === key;
+          });
+          if (!hasOdds && eg.status !== 'live') continue;
+        }
 
         seenKeys.add(key);
         uniqueTipoffs.push({
