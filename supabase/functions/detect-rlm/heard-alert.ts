@@ -11,6 +11,8 @@
 //    HEARD_ALERT_TOTAL_NHL — Total move on NHL
 // ══════════════════════════════════════════════════════════════════════════════
 
+import { centMove } from "../../../api/lib/hsa/odds/cent-line.ts";
+
 // ── Book Weights ─────────────────────────────────────────────────────────────
 
 const BOOK_WEIGHTS: Record<string, number> = {
@@ -39,7 +41,7 @@ export function americanToImpliedProb(odds: number): number {
 
 /** Calculate ML delta in cents (absolute difference) */
 export function calcMLDelta(openML: number, currentML: number): number {
-  return Math.abs(currentML - openML);
+  return Math.abs(centMove(openML, currentML));
 }
 
 /** Determine which book moved first in the consensus direction */
@@ -50,7 +52,7 @@ export function getLeadingBook(
   // Filter to books that actually moved in the consensus direction
   const movers = bookMoves
     .filter(b => {
-      const delta = b.currML - b.openML;
+      const delta = centMove(b.openML, b.currML);
       return Math.sign(delta) === consensusDirection || (consensusDirection < 0 && delta < 0) || (consensusDirection > 0 && delta > 0);
     })
     .sort((a, b) => new Date(a.lastAt).getTime() - new Date(b.lastAt).getTime());
@@ -98,7 +100,7 @@ export function detectRetrace(
 ): boolean {
   // A retrace is when >50% of movers reversed direction
   const movers = bookMoves.filter(b => {
-    const delta = b.currML - b.openML;
+    const delta = centMove(b.openML, b.currML);
     return Math.abs(delta) > 0 && Math.sign(delta) === consensusDirection;
   });
 
@@ -228,9 +230,9 @@ function detectHeardAlertML(
   // Compute per-book deltas (in cents, from home perspective)
   const deltas = bookMLs.map(b => ({
     book: b.book,
-    delta: b.currML - b.openML,
-    absDelta: Math.abs(b.currML - b.openML),
-    moved: Math.abs(b.currML - b.openML) >= 3, // 3-cent minimum to count as "moved"
+    delta: centMove(b.openML, b.currML),
+    absDelta: Math.abs(centMove(b.openML, b.currML)),
+    moved: Math.abs(centMove(b.openML, b.currML)) >= 3, // 3-cent minimum to count as "moved"
     openML: b.openML,
     currML: b.currML,
     firstAt: b.firstAt ?? '',
@@ -267,8 +269,11 @@ function detectHeardAlertML(
   const sharpSide = moveTowardHome ? homeTeam : awayTeam;
   const sharpIsUnderdog = (moveTowardHome && homeIsUnderdog) || (!moveTowardHome && !homeIsUnderdog);
 
-  // Compute consensus ML delta in cents
-  const avgDelta = Math.abs(avgCurrHome - avgOpenHome);
+  // Compute consensus ML delta in cents — cent-line first per book, then average.
+  // (Averaging American odds before subtracting is invalid regardless of sign-flip:
+  // avg(-110, +105) = -2.5 is not a valid odds value.)
+  const perBookDeltas = bookMLs.map(b => centMove(b.openML, b.currML));
+  const avgDelta = Math.abs(perBookDeltas.reduce((s, d) => s + d, 0) / perBookDeltas.length);
 
   // Apply thresholds based on underdog vs favorite
   if (sharpIsUnderdog) {

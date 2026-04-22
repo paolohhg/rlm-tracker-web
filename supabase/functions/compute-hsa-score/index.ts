@@ -6,6 +6,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { centMove } from "../../../api/lib/hsa/odds/cent-line.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -136,7 +137,7 @@ function scoreBreadth(snapshots: any[]): number {
   // Check if moneyline moved in same direction as spread
   if (first.moneyline_home != null && last.moneyline_home != null && first.spread != null && last.spread != null) {
     const spreadMove = last.spread - first.spread;
-    const mlMove = last.moneyline_home - first.moneyline_home;
+    const mlMove = centMove(first.moneyline_home, last.moneyline_home);
     // Spread more negative = home more favored. ML more negative = home more favored.
     if (Math.sign(spreadMove) === Math.sign(mlMove) && Math.abs(mlMove) >= 5) {
       score += 5;

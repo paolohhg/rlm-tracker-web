@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
+import { centMove } from './lib/hsa/odds/cent-line';
 // Dynamic import to prevent module-load crash if lifecycle engine has issues
 type MarketAnalysis = import('./lib/market-lifecycle-engine').MarketAnalysis;
 
@@ -476,9 +477,9 @@ function summarizeOdds(snapshots: OddsSnapshot[], gameTime: string, league: stri
 
   // Moneyline movement (critical for MLB signal detection)
   const mlHomeMovement = (openingConsensusMlHome !== 0 && currentConsensusMlHome !== 0)
-    ? currentConsensusMlHome - openingConsensusMlHome : 0;
+    ? centMove(openingConsensusMlHome, currentConsensusMlHome) : 0;
   const mlAwayMovement = (openingConsensusMlAway !== 0 && currentConsensusMlAway !== 0)
-    ? currentConsensusMlAway - openingConsensusMlAway : 0;
+    ? centMove(openingConsensusMlAway, currentConsensusMlAway) : 0;
 
   // ML direction: describe which team the market is moving toward.
   // mlHomeMovement < 0 = home ML getting more negative = home strengthening as favorite
@@ -692,7 +693,7 @@ function computeBookCoordination(
       book: displayBookName(book),
       openLine,
       currentLine,
-      move: currentLine - openLine,
+      move: market === 'moneyline' ? centMove(openLine, currentLine) : (currentLine - openLine),
       firstAt: open.fetched_at,
       lastAt: curr.fetched_at,
       firstMoveAt,
@@ -1043,8 +1044,8 @@ function buildHsaUserMessage(
     for (const cb of summary.current.books) {
       const ob = summary.opening.books.find(o => o.book === cb.book);
       if (!ob) continue;
-      const homeMove = cb.mlHome - ob.mlHome;
-      const awayMove = cb.mlAway - ob.mlAway;
+      const homeMove = centMove(ob.mlHome, cb.mlHome);
+      const awayMove = centMove(ob.mlAway, cb.mlAway);
       const moved = Math.abs(homeMove) >= 3 || Math.abs(awayMove) >= 3;
       mlPerBook.push(`  ${cb.book}: ${homeTeam} ML ${ob.mlHome} → ${cb.mlHome} (${homeMove >= 0 ? '+' : ''}${homeMove}) | ${awayTeam} ML ${ob.mlAway} → ${cb.mlAway} (${awayMove >= 0 ? '+' : ''}${awayMove}) ${moved ? '[MOVED]' : '[HELD]'}`);
     }

@@ -10,6 +10,8 @@
 //  underdog pricing. This module prevents that misclassification.
 // ══════════════════════════════════════════════════════════════════════════════
 
+import { centMove } from './hsa/odds/cent-line';
+
 // ── NHL Signal Types ─────────────────────────────────────────────────────────
 
 export type NhlSideSignalType =
@@ -154,7 +156,7 @@ function mlConfirmsSpreadDirection(
   spreadDirection: 'toward_home' | 'toward_away' | 'none',
 ): boolean {
   if (spreadDirection === 'none') return false;
-  const mlMove = currentMlHome - openingMlHome;
+  const mlMove = centMove(openingMlHome, currentMlHome);
   // ML moving positive = away team becoming more favored
   // ML moving negative = home team becoming more favored
   if (spreadDirection === 'toward_away' && mlMove > 5) return true;

@@ -15,6 +15,7 @@ import type {
   MlbBookLine,
   PitcherInfo,
 } from './types';
+import { centMove } from '../hsa/odds/cent-line';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -114,8 +115,8 @@ export function normalizeMLBMarket(
     home_current: homeCurr,
     away_open: awayOpen,
     away_current: awayCurr,
-    home_delta: (homeOpen != null && homeCurr != null) ? homeCurr - homeOpen : 0,
-    away_delta: (awayOpen != null && awayCurr != null) ? awayCurr - awayOpen : 0,
+    home_delta: (homeOpen != null && homeCurr != null) ? centMove(homeOpen, homeCurr) : 0,
+    away_delta: (awayOpen != null && awayCurr != null) ? centMove(awayOpen, awayCurr) : 0,
     books_reporting: perBookHome.length,
     consensus_side: consensusSide,
     per_book_home: perBookHome,
@@ -160,7 +161,7 @@ export function normalizeMLBMarket(
     current_favorite_price: rlFavPriceCurr,
     open_dog_price: null, // away price not stored in current schema
     current_dog_price: null,
-    favorite_price_delta: (rlFavPriceOpen != null && rlFavPriceCurr != null) ? rlFavPriceCurr - rlFavPriceOpen : 0,
+    favorite_price_delta: (rlFavPriceOpen != null && rlFavPriceCurr != null) ? centMove(rlFavPriceOpen, rlFavPriceCurr) : 0,
     underdog_price_delta: 0,
     books_reporting: rlBooksReporting,
     line_changed: lineChanged,
@@ -185,8 +186,8 @@ export function normalizeMLBMarket(
   const underPriceCurr = underPriceCurrs.length ? mode(underPriceCurrs) : null;
 
   const numberMoved = Math.abs(totalNumDelta) >= 0.5;
-  const overPriceDelta = (overPriceOpen != null && overPriceCurr != null) ? overPriceCurr - overPriceOpen : 0;
-  const underPriceDelta = (underPriceOpen != null && underPriceCurr != null) ? underPriceCurr - underPriceOpen : 0;
+  const overPriceDelta = (overPriceOpen != null && overPriceCurr != null) ? centMove(overPriceOpen, overPriceCurr) : 0;
+  const underPriceDelta = (underPriceOpen != null && underPriceCurr != null) ? centMove(underPriceOpen, underPriceCurr) : 0;
   const juiceShiftOnly = !numberMoved && (Math.abs(overPriceDelta) >= 5 || Math.abs(underPriceDelta) >= 5);
 
   // Direction logic — check if books disagree for 'mixed'
