@@ -7,6 +7,7 @@ import {
   detectHeardAlertTotalNHL,
   type HeardAlertResult,
 } from "./heard-alert.ts";
+import { centMove } from "../../../api/lib/hsa/odds/cent-line.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -240,7 +241,7 @@ async function buildGameFacts(
       const currProb = americanToImpliedProb(currML);
       const probDelta = parseFloat(((currProb - openProb) * 100).toFixed(2));
       mlProbDeltas.push(probDelta);
-      mlRawMovements.push(parseFloat((currML - openML).toFixed(0)));
+      mlRawMovements.push(parseFloat(centMove(openML, currML).toFixed(0)));
       bookMLs.push({ openML, currML, openProb, currProb, book });
     }
   }
