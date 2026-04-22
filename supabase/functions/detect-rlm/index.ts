@@ -8,6 +8,7 @@ import {
   type HeardAlertResult,
 } from "./heard-alert.ts";
 import { centMove } from "../../../api/lib/hsa/odds/cent-line.ts";
+import { persistHeardAlert } from "../../../api/lib/heard-alert-persistence.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -1278,6 +1279,28 @@ serve(async (req) => {
       // ── Step 7: Upsert ──
       await supabase.from("rlm_alerts").upsert(alert, { onConflict: "home_team,away_team,league" });
       results.push(alert);
+
+      // ── Step 8: Durable HEARD alert persistence (side alerts only) ──
+      // Runs after the result is already in results[] / upserted to rlm_alerts,
+      // so persistence failures cannot affect the caller's response. Total-
+      // variant alerts (market === 'total') intentionally skipped — the
+      // forward-compat schema allows them but wiring is in a separate brief.
+      if (
+        heardAlert != null &&
+        (heardAlert.type === "HEARD_ALERT_MLB" || heardAlert.type === "HEARD_ALERT_NHL")
+      ) {
+        await persistHeardAlert(supabase, {
+          gameId: gf.gameKey,
+          alertType: heardAlert.type,
+          sharpSide: heardAlert.sharpSide,
+          avgDeltaCents: heardAlert.moveData.deltaCents,
+          confidence: heardAlert.confidence,
+          participationRate: heardAlert.booksInvolved.participationRate,
+          leadingBook: heardAlert.booksInvolved.leader ?? null,
+          booksMovedCount: heardAlert.booksInvolved.count,
+          gameStartsAt: gf.gameTime,
+        });
+      }
     }
 
     return new Response(
